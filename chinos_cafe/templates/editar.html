@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block titulo %}Editar pizza - CHINOS CAFE S.A.{% endblock %}
+{% block contenido %}
+
+<h1>✏️ Editar combo #{{ pizza.id }}</h1>
+
+<section class="formulario ancho">
+    <form method="post" action="{{ url_for('fabrica_editar', pizza_id=pizza.id) }}">
+        <label>Nombre del combo</label>
+        <input type="text" name="nombre" value="{{ pizza.nombre }}" required>
+
+        <label>Tamaño</label>
+        <select name="tamano" required>
+            {% for t in tamanos %}
+            <option value="{{ t }}" {% if t == pizza.tamano %}selected{% endif %}>{{ t }}</option>
+            {% endfor %}
+        </select>
+
+        <label>Ingredientes (2 a 10)</label>
+        <select name="ingredientes" multiple size="8" required>
+            {% for i in ingredientes %}
+            <option value="{{ i }}" {% if i in seleccionados %}selected{% endif %}>{{ i }}</option>
+            {% endfor %}
+        </select>
+
+        <label>Refresco</label>
+        <select name="refresco">
+            {% for r in refrescos %}
+            <option value="{{ r }}" {% if r == pizza.refresco %}selected{% endif %}>{{ r }}</option>
+            {% endfor %}
+        </select>
+
+        <label>Ítem adicional</label>
+        <select name="item_adicional">
+            {% for e in extras %}
+            <option value="{{ e }}" {% if e == pizza.item_adicional %}selected{% endif %}>{{ e }}</option>
+            {% endfor %}
+        </select>
+
+        <label>Precio (B/.)</label>
+        <input type="number" name="precio" step="0.01" min="0.01" value="{{ pizza.precio }}" required>
+
+        <div class="fila-botones">
+            <button class="btn verde">💾 Guardar cambios</button>
+            <a class="btn gris" href="{{ url_for('fabrica') }}">Cancelar</a>
+        </div>
+    </form>
+</section>
+
+{% endblock %}

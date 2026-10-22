@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block titulo %}Pedidos - CHINOS CAFE S.A.{% endblock %}
+{% block contenido %}
+
+<h1>🛒 Pedidos</h1>
+<p class="sub">El cliente arma su combo. Se guarda en 2 DB (replicación), se genera JSON y se envía por correo.</p>
+
+<div class="dos-columnas">
+    <section class="formulario">
+        <h2>Nuevo pedido</h2>
+        <form method="post" action="{{ url_for('pedidos_crear') }}">
+            <label>Nombre del cliente</label>
+            <input type="text" name="cliente_nombre" required>
+
+            <label>Correo del cliente</label>
+            <input type="email" name="cliente_correo" placeholder="cliente@correo.com" required>
+
+            <label>Combo de pizza (combo box)</label>
+            <select name="pizza_id" required>
+                <option value="">-- Seleccione un combo --</option>
+                {% for p in pizzas %}
+                <option value="{{ p.id }}">{{ p.nombre }} ({{ p.tamano }}) - B/. {{ '%.2f'|format(p.precio) }}</option>
+                {% endfor %}
+            </select>
+
+            <label>Refresco (combo box)</label>
+            <select name="refresco">
+                {% for r in refrescos %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+            </select>
+
+            <label>Cantidad</label>
+            <input type="number" name="cantidad" min="1" value="1" required>
+
+            <label>Notas (opcional)</label>
+            <textarea name="notas" rows="2" placeholder="Sin cebolla, bien cocida..."></textarea>
+
+            <button class="btn verde">✅ Confirmar pedido</button>
+        </form>
+    </section>
+
+    <section>
+        <h2>Pedidos registrados ({{ pedidos|length }})</h2>
+        <table>
+            <tr><th>#</th><th>Cliente</th><th>Combo</th><th>Cant</th><th>Subtotal</th><th>Estado</th><th>Fecha</th></tr>
+            {% for p in pedidos %}
+            <tr>
+                <td>{{ p.id }}</td><td>{{ p.cliente_nombre }}</td><td>{{ p.pizza_nombre }}</td>
+                <td>{{ p.cantidad }}</td><td>B/. {{ '%.2f'|format(p.subtotal) }}</td>
+                <td><span class="etiqueta">{{ p.estado }}</span></td><td>{{ p.fecha }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" class="vacio">Sin pedidos aún.</td></tr>
+            {% endfor %}
+        </table>
+    </section>
+</div>
+
+{% endblock %}

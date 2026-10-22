@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block titulo %}Pagos - CHINOS CAFE S.A.{% endblock %}
+{% block contenido %}
+
+<h1>💳 Pagos</h1>
+<p class="sub">Confirmación de pago vía <b>YAPPY Comercial</b>. Flete B/. {{ '%.2f'|format(flete) }} si no retira en sitio.
+Genera JSON y correo de confirmación.</p>
+
+<div class="dos-columnas">
+    <section class="formulario">
+        <h2>Registrar pago</h2>
+        <form method="post" action="{{ url_for('pagos_crear') }}">
+            <label>Pedido a pagar (combo box)</label>
+            <select name="pedido_id" required>
+                <option value="">-- Seleccione pedido pendiente --</option>
+                {% for p in pendientes %}
+                <option value="{{ p.id }}">#{{ p.id }} - {{ p.cliente_nombre }} - {{ p.pizza_nombre }} (B/. {{ '%.2f'|format(p.subtotal) }})</option>
+                {% endfor %}
+            </select>
+
+            <label>Referencia / captura YAPPY Comercial</label>
+            <input type="text" name="referencia" placeholder="Ej: YPY-000123456" required>
+
+            <label>Tipo de entrega</label>
+            <select name="entrega" required>
+                <option value="">-- Seleccione --</option>
+                <option value="RETIRO EN SITIO">Retiro en sitio (sin flete)</option>
+                <option value="FLETE A DOMICILIO">Flete a domicilio (+B/. {{ '%.2f'|format(flete) }})</option>
+            </select>
+
+            <div class="yappy">
+                <span class="logo-yappy">YAPPY</span>
+                <small>Captura del pago comercial. El sistema calcula el total con flete.</small>
+            </div>
+
+            <button class="btn verde">💵 Confirmar pago y despachar</button>
+        </form>
+    </section>
+
+    <section>
+        <h2>Pagos registrados ({{ pagos|length }})</h2>
+        <table>
+            <tr><th>#</th><th>Pedido</th><th>Método</th><th>Referencia</th><th>Monto</th><th>Entrega</th><th>Fecha</th></tr>
+            {% for p in pagos %}
+            <tr>
+                <td>{{ p.id }}</td><td>#{{ p.pedido_id }}</td><td>{{ p.metodo }}</td>
+                <td>{{ p.referencia }}</td><td>B/. {{ '%.2f'|format(p.monto) }}</td>
+                <td>{{ p.entrega }}</td><td>{{ p.fecha }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" class="vacio">Sin pagos aún.</td></tr>
+            {% endfor %}
+        </table>
+    </section>
+</div>
+
+{% endblock %}

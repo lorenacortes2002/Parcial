@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block titulo %}Panel - CHINOS CAFE S.A.{% endblock %}
+{% block contenido %}
+
+<h1>Panel de control</h1>
+<p class="sub">Sistema de pedidos de combos de PIZZA - prototipo Flask (I Parte).</p>
+
+<section class="tarjetas">
+    <div class="tarjeta"><span class="num">{{ pizzas|length }}</span>Combos en fábrica</div>
+    <div class="tarjeta"><span class="num">{{ pedidos|length }}</span>Pedidos</div>
+    <div class="tarjeta"><span class="num">{{ pagos|length }}</span>Pagos</div>
+</section>
+
+<section class="panel-replica">
+    <h2>Replicación de datos (2 DB)</h2>
+    <table class="mini">
+        <tr><th>Base de datos</th><th>Pizzas</th><th>Pedidos</th><th>Pagos</th></tr>
+        {% for nombre, c in conteos.items() %}
+        <tr><td><b>{{ nombre }}</b></td><td>{{ c.pizzas }}</td><td>{{ c.pedidos }}</td><td>{{ c.pagos }}</td></tr>
+        {% endfor %}
+    </table>
+    <form method="post" action="{{ url_for('replicar') }}">
+        <button class="btn azul">🔄 Sincronizar Primaria → Réplica</button>
+    </form>
+    <p class="ayuda">La data se escribe en ambas DB automáticamente. Este botón fuerza una
+    sincronización completa (proceso de replicación).</p>
+</section>
+
+<section>
+    <h2>Combos disponibles</h2>
+    <table>
+        <tr><th>#</th><th>Combo</th><th>Tamaño</th><th>Ingredientes</th><th>Refresco</th><th>Precio</th></tr>
+        {% for p in pizzas %}
+        <tr>
+            <td>{{ p.id }}</td><td>{{ p.nombre }}</td><td>{{ p.tamano }}</td>
+            <td class="ing">{{ p.ingredientes }}</td><td>{{ p.refresco }}</td>
+            <td>B/. {{ '%.2f'|format(p.precio) }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</section>
+
+<section>
+    <h2>Últimos pedidos</h2>
+    <table>
+        <tr><th>#</th><th>Cliente</th><th>Combo</th><th>Cant</th><th>Total</th><th>Estado</th><th>Fecha</th></tr>
+        {% for p in pedidos %}
+        <tr>
+            <td>{{ p.id }}</td><td>{{ p.cliente_nombre }}</td><td>{{ p.pizza_nombre }}</td>
+            <td>{{ p.cantidad }}</td><td>B/. {{ '%.2f'|format(p.total) }}</td>
+            <td><span class="etiqueta">{{ p.estado }}</span></td><td>{{ p.fecha }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="vacio">Sin pedidos aún.</td></tr>
+        {% endfor %}
+    </table>
+</section>
+
+{% endblock %}

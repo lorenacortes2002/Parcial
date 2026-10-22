@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block titulo %}CHINOS CAFE S.A.{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='estilos.css') }}">
+</head>
+<body>
+    <header class="barra">
+        <div class="marca">🍕 CHINOS CAFE <span>S.A.</span></div>
+        <nav>
+            <a href="{{ url_for('inicio') }}">Panel</a>
+            <a href="{{ url_for('fabrica') }}">Fábrica</a>
+            <a href="{{ url_for('pedidos') }}">Pedidos</a>
+            <a href="{{ url_for('pagos') }}">Pagos</a>
+        </nav>
+        <div class="reloj" id="reloj"></div>
+    </header>
+
+    <main class="contenedor">
+        {% with mensajes = get_flashed_messages(with_categories=true) %}
+          {% if mensajes %}
+            <div class="avisos">
+              {% for categoria, texto in mensajes %}
+                <div class="aviso {{ categoria }}">{{ texto }}</div>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
+
+        {% block contenido %}{% endblock %}
+    </main>
+
+    <footer class="pie">
+        Examen Parcial 2 - Ingeniería Web (UTP) · Prof. Napoleón Ibarra ·
+        Integrantes: ______________ / ______________
+    </footer>
+
+    <script>
+        // Reloj en vivo (fecha/hora para las capturas de pantalla)
+        function tic() {
+            const ahora = new Date();
+            document.getElementById('reloj').textContent =
+                ahora.toLocaleDateString('es-PA') + ' ' + ahora.toLocaleTimeString('es-PA');
+        }
+        setInterval(tic, 1000); tic();
+    </script>
+</body>
+</html>
