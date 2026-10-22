@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Pedidos · CHINOS CAFÉ{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <p class="eyebrow">Tu próxima comida favorita</p>
+  <h1>Crear un pedido</h1>
+  <p>Cuéntanos qué se te antoja. Nosotros nos encargamos del resto.</p>
+</div>
+
+<div class="form-card">
+<form method="POST" class="form">
+  <label>Nombre del cliente</label>
+  <input type="text" name="cliente" required>
+
+  <label>Correo del cliente</label>
+  <input type="email" name="correo_cliente" required>
+
+  <label>Pizza (combo)</label>
+  <select name="pizza_id" required>
+    {% for p in pizzas %}
+      <option value="{{ p.id }}">{{ p.nombre }} — ${{ "%.2f"|format(p.precio) }}</option>
+    {% endfor %}
+  </select>
+
+  <label>Refresco</label>
+  <select name="refresco">
+    {% for r in refrescos_disponibles %}
+      <option value="{{ r }}">{{ r }}</option>
+    {% endfor %}
+  </select>
+
+  <label>Cantidad</label>
+  <input type="number" name="cantidad" min="1" value="1" required>
+
+  <label>Entrega</label>
+  <select name="retiro_o_flete">
+    <option value="RETIRO EN SITIO">Retiro en sitio</option>
+    <option value="FLETE A DOMICILIO">Flete a domicilio</option>
+  </select>
+
+  <div class="form-actions">
+    <button type="submit" class="btn">Confirmar pedido</button>
+  </div>
+</form>
+</div>
+
+<h2 class="section-title">Pedidos recientes</h2>
+<div class="table-wrap">
+<table class="tabla">
+  <thead>
+    <tr><th>#</th><th>Cliente</th><th>Pizza</th><th>Cant.</th><th>Total</th><th>Entrega</th><th>Estado</th><th>Fecha</th></tr>
+  </thead>
+  <tbody>
+    {% for pe in pedidos %}
+    <tr>
+      <td>{{ pe.id }}</td>
+      <td>{{ pe.cliente }}</td>
+      <td>{{ pe.pizza_nombre }}</td>
+      <td>{{ pe.cantidad }}</td>
+      <td>${{ "%.2f"|format(pe.total) }}</td>
+      <td>{{ pe.retiro_o_flete }}</td>
+      <td><span class="estado">{{ pe.estado }}</span></td>
+      <td>{{ pe.fecha }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="8">Todavía no hay pedidos registrados.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Pagos · CHINOS CAFÉ{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <p class="eyebrow">Pago seguro y sencillo</p>
+  <h1>Confirmar un pago</h1>
+  <p>Selecciona un pedido pendiente para registrar su pago con Yappy Comercial.</p>
+</div>
+
+{% if pedidos %}
+<div class="form-card">
+<form method="POST" class="form">
+  <label>Pedido pendiente de pago</label>
+  <select name="pedido_id" required>
+    {% for pe in pedidos %}
+      <option value="{{ pe.id }}">
+        #{{ pe.id }} — {{ pe.cliente }} — {{ pe.pizza_nombre }} — ${{ "%.2f"|format(pe.total) }} — {{ pe.retiro_o_flete }}
+      </option>
+    {% endfor %}
+  </select>
+
+  <p class="form-note">Método de pago <strong>Yappy Comercial</strong> · Confirmación simulada para este prototipo.</p>
+
+  <div class="form-actions">
+    <button type="submit" class="btn">Confirmar pago con Yappy</button>
+  </div>
+</form>
+</div>
+{% else %}
+<div class="empty-state"><p>No hay pedidos pendientes de pago.</p></div>
+{% endif %}
+
+<h2 class="section-title">Historial de pagos</h2>
+<div class="table-wrap">
+<table class="tabla">
+  <thead>
+    <tr><th>#</th><th>Pedido</th><th>Cliente</th><th>Método</th><th>Monto</th><th>Estado</th><th>Entrega</th><th>Fecha</th></tr>
+  </thead>
+  <tbody>
+    {% for pa in pagos %}
+    <tr>
+      <td>{{ pa.id }}</td>
+      <td>#{{ pa.pedido_id }}</td>
+      <td>{{ pa.cliente }}</td>
+      <td>{{ pa.metodo }}</td>
+      <td>${{ "%.2f"|format(pa.monto) }}</td>
+      <td><span class="estado">{{ pa.estado }}</span></td>
+      <td>{{ pa.retiro_o_flete }}</td>
+      <td>{{ pa.fecha }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="8">Los pagos confirmados aparecerán aquí.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

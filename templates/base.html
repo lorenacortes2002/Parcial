@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#193a2b">
+<meta name="description" content="Pizzas artesanales y combos para compartir. Ordena tu favorito en CHINOS CAFÉ.">
+<title>{% block title %}CHINOS CAFÉ · Pizzería artesanal{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="{{ url_for('index') }}" aria-label="CHINOS CAFÉ, inicio">
+    <span class="brand-mark" aria-hidden="true">✦</span>
+    <span class="brand-name">CHINOS CAFÉ<span class="brand-subtitle">PIZZERÍA ARTESANAL</span></span>
+  </a>
+  <nav>
+    <a class="{{ 'active' if request.endpoint == 'index' else '' }}" href="{{ url_for('index') }}">Menú</a>
+    <a class="{{ 'active' if request.endpoint in ['fabrica', 'fabrica_nueva', 'fabrica_editar'] else '' }}" href="{{ url_for('fabrica') }}">Fábrica</a>
+    <a class="{{ 'active' if request.endpoint == 'pedidos' else '' }}" href="{{ url_for('pedidos') }}">Pedidos</a>
+    <a class="{{ 'active' if request.endpoint == 'pagos' else '' }}" href="{{ url_for('pagos') }}">Pagos</a>
+  </nav>
+</header>
+
+<main class="container">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  {% block content %}{% endblock %}
+</main>
+
+<footer>CHINOS CAFÉ &middot; Hecho para compartir, preparado con cariño.</footer>
+</body>
+</html>

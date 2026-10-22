@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Fábrica · CHINOS CAFÉ{% endblock %}
+{% block content %}
+<div class="section-header">
+  <div class="page-heading">
+    <p class="eyebrow">Administración</p>
+    <h1>Fábrica de pizzas</h1>
+    <p>Organiza las recetas y los combos disponibles en el menú.</p>
+  </div>
+  <a class="btn" href="{{ url_for('fabrica_nueva') }}">+ Nueva pizza</a>
+</div>
+
+<div class="table-wrap">
+<table class="tabla">
+  <thead>
+    <tr><th>#</th><th>Nombre</th><th>Ingredientes</th><th>Refresco</th><th>Precio</th><th>Acciones</th></tr>
+  </thead>
+  <tbody>
+    {% for p in pizzas %}
+    <tr>
+      <td>{{ p.id }}</td>
+      <td>{{ p.nombre }}</td>
+      <td>{{ p.ingredientes.replace(',', ', ') }}</td>
+      <td>{{ p.refresco }}</td>
+      <td>${{ "%.2f"|format(p.precio) }}</td>
+      <td class="acciones">
+        <a href="{{ url_for('fabrica_editar', pizza_id=p.id) }}">Editar</a>
+        <form method="POST" action="{{ url_for('fabrica_eliminar', pizza_id=p.id) }}"
+              onsubmit="return confirm('¿Eliminar esta pizza?');">
+          <button type="submit" class="link-danger">Eliminar</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6">Todavía no hay pizzas registradas. Crea la primera para completar el menú.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

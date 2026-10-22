@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Menú · CHINOS CAFÉ{% endblock %}
+{% block content %}
+<section class="hero">
+  <div class="hero-copy">
+    <p class="eyebrow">Sabor que reúne</p>
+    <h1>Una buena pizza siempre es un buen plan.</h1>
+    <p>Recetas generosas, ingredientes frescos y ese sabor que invita a compartir.</p>
+    <a class="btn btn-light" href="{{ url_for('pedidos') }}">Arma tu pedido <span aria-hidden="true">&nbsp;→</span></a>
+  </div>
+  <div class="hero-art" aria-hidden="true">✦</div>
+</section>
+
+<div class="page-heading">
+  <p class="eyebrow">Nuestro menú</p>
+  <h2>Favoritos de la casa</h2>
+  <p>Combos preparados al momento para disfrutar en cualquier ocasión.</p>
+</div>
+<div class="grid">
+  {% for p in pizzas %}
+  <div class="card">
+    <div class="pizza-art" aria-hidden="true">🍕</div>
+    <div class="card-body">
+      <h3>{{ p.nombre }}</h3>
+      <p class="muted">{{ p.ingredientes.replace(',', ', ') }}</p>
+      <p class="drink">🥤 {{ p.refresco }}</p>
+      <div class="card-bottom">
+        <span class="precio">${{ "%.2f"|format(p.precio) }}</span>
+        <a class="btn" href="{{ url_for('pedidos') }}">Pedir</a>
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <p>Aún estamos preparando el menú.</p>
+    <a href="{{ url_for('fabrica') }}">Ir a Fábrica para agregar pizzas</a>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,16 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Iniciar app Flask",
+			"type": "shell",
+			"command": "${workspaceFolder}/.venv/bin/python",
+			"args": [
+				"-c",
+				"import database; database.init_db(); from app import app; app.run(host=\"127.0.0.1\", port=5002, debug=False)"
+			],
+			"isBackground": true,
+			"problemMatcher": []
+		}
+	]
+}
