@@ -8,7 +8,22 @@
     <p>Recetas generosas, ingredientes frescos y ese sabor que invita a compartir.</p>
     <a class="btn btn-light" href="{{ url_for('pedidos') }}">Arma tu pedido <span aria-hidden="true">&nbsp;→</span></a>
   </div>
-  <div class="hero-art" aria-hidden="true">✦</div>
+  <div class="hero-art" aria-hidden="true"></div>
+</section>
+
+<section class="service-points" aria-label="Ventajas de CHINOS CAFÉ">
+  <div class="service-point">
+    <span class="service-number">01</span>
+    <div><strong>Recetas de la casa</strong><span>Combos con ingredientes favoritos</span></div>
+  </div>
+  <div class="service-point">
+    <span class="service-number">02</span>
+    <div><strong>Pedido sencillo</strong><span>Elige tu pizza en pocos pasos</span></div>
+  </div>
+  <div class="service-point">
+    <span class="service-number">03</span>
+    <div><strong>A tu manera</strong><span>Retiro en sitio o entrega a domicilio</span></div>
+  </div>
 </section>
 
 <div class="page-heading">
@@ -18,18 +33,18 @@
 </div>
 <div class="grid">
   {% for p in pizzas %}
-  <div class="card">
-    <div class="pizza-art" aria-hidden="true">🍕</div>
+  <article class="card">
+    <div class="pizza-art pizza-art--{{ loop.index0 % 5 }}" aria-hidden="true"></div>
     <div class="card-body">
       <h3>{{ p.nombre }}</h3>
       <p class="muted">{{ p.ingredientes.replace(',', ', ') }}</p>
       <p class="drink">🥤 {{ p.refresco }}</p>
       <div class="card-bottom">
         <span class="precio">${{ "%.2f"|format(p.precio) }}</span>
-        <a class="btn" href="{{ url_for('pedidos') }}">Pedir</a>
+        <a class="btn" href="{{ url_for('pedidos', pizza_id=p.id) }}">Pedir</a>
       </div>
     </div>
-  </div>
+  </article>
   {% else %}
   <div class="empty-state">
     <p>Aún estamos preparando el menú.</p>

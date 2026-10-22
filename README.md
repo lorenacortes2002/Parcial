@@ -11,6 +11,7 @@ chinos_cafe/
 ├── requirements.txt
 ├── templates/            # Vistas HTML (Jinja2)
 ├── static/style.css
+├── tests/                 # Pruebas automatizadas de los requisitos del prototipo
 ├── pedidos_json/         # Se generan automáticamente los JSON de cada pedido
 ├── pagos_json/           # Se generan automáticamente los JSON de cada pago
 ├── db_local.sqlite3      # Se crea al primer arranque (BD relacional local)
@@ -29,12 +30,27 @@ python app.py
 Abrir **http://127.0.0.1:5000**
 
 - `/` → Menú público
+- Cada botón «Pedir» conserva la pizza elegida y el resumen del pedido actualiza el subtotal en pantalla.
 - `/fabrica` → CRUD de pizzas (crear, editar, eliminar) — mínimo 2 y máximo 10 ingredientes por pizza
+- El catálogo inicia con cinco combos y no permite eliminar si quedan menos de cinco.
 - `/pedidos` → El cliente arma su combo; se guarda en `db_local.sqlite3`, se **replica** en
   `db_replica.sqlite3`, se genera un JSON en `pedidos_json/` y se intenta enviar por correo
-  (si no hay servidor SMTP configurado, queda registrado en `correos_enviados.log` sin tumbar la app — cumple el requisito de Try/Catch).
+  (si no hay servidor SMTP configurado, queda registrado en `correos_enviados.log`; el sitio avisa que no se envió).
 - `/pagos` → Confirma el pago (simulación Yappy Comercial), genera el JSON en `pagos_json/`
   y actualiza el estado del pedido a `PAGADO` (o `PAGADO - DESPACHAR (FLETE)` si eligió flete).
+  Un pedido pagado no se puede cobrar una segunda vez.
+
+### Pruebas del prototipo
+Con el entorno virtual activado, ejecutar:
+```bash
+python -m unittest discover -s tests -v
+```
+Las pruebas usan bases SQLite temporales y simulan el correo para no enviar mensajes reales.
+La tarea de VS Code **Iniciar app Flask** abre la vista local en `http://127.0.0.1:5005`.
+
+La base `db_replica.sqlite3` simula una réplica relacional; no se conecta automáticamente a una
+máquina virtual remota. Para una réplica entre equipos, hay que configurar y desplegar un servidor
+de base de datos accesible desde ambas máquinas.
 
 ### Configurar el correo real (opcional)
 Definir variables de entorno antes de ejecutar:
@@ -61,6 +77,7 @@ cd /var/www/chinos_cafe
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt gunicorn
+python -c "import database; database.init_db()"
 ```
 
 **Ejecutar la app con Gunicorn** (servidor WSGI de producción):

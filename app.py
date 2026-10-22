@@ -15,6 +15,8 @@ Para producción (servidor Linux con NGINX) ver README.md
 
 import os
 import secrets
+import math
+import re
 import sqlite3
 from datetime import datetime
 
@@ -41,6 +43,53 @@ INGREDIENTES_DISPONIBLES = [
 REFRESCOS_DISPONIBLES = [
     "Coca-Cola", "Coca-Cola Zero", "Sprite", "Fanta", "Agua", "Ninguno"
 ]
+
+
+def _pizza_fields_from_form():
+    nombre = request.form.get("nombre", "").strip()
+    ingredientes = request.form.getlist("ingredientes")
+    refresco = request.form.get("refresco", "")
+    precio = float(request.form.get("precio", "0"))
+
+    if not nombre:
+        raise ValueError("El nombre de la pizza es obligatorio.")
+    if len(ingredientes) < MIN_INGREDIENTES or len(ingredientes) > MAX_INGREDIENTES:
+        raise ValueError(
+            f"Debe seleccionar entre {MIN_INGREDIENTES} y {MAX_INGREDIENTES} ingredientes."
+        )
+    if len(set(ingredientes)) != len(ingredientes) or not set(ingredientes).issubset(
+        INGREDIENTES_DISPONIBLES
+    ):
+        raise ValueError("Seleccione ingredientes válidos y sin duplicados.")
+    if refresco not in REFRESCOS_DISPONIBLES:
+        raise ValueError("Seleccione un refresco válido.")
+    if not math.isfinite(precio) or precio <= 0:
+        raise ValueError("El precio debe ser un número mayor a cero.")
+
+    return nombre, ingredientes, refresco, precio
+
+
+def _notify_json_recipients(recipients, subject, json_data, ruta_json):
+    if not ruta_json:
+        flash(
+            "La transacción quedó guardada, pero no se pudo crear su archivo JSON; "
+            "no se intentó enviar el correo.",
+            "warning",
+        )
+        return
+
+    results = [
+        enviar_correo(destinatario, subject, json_data, ruta_json)
+        for destinatario in recipients
+    ]
+    if all(sent for sent, _ in results):
+        flash("Archivo JSON creado y correos de confirmación enviados.", "success")
+    else:
+        flash(
+            "Archivo JSON creado y transacción guardada, pero no se pudieron enviar "
+            "todos los correos. Verifique la configuración SMTP y el log.",
+            "warning",
+        )
 
 
 # ----------------------------------------------------------------------
@@ -77,20 +126,7 @@ def fabrica():
 def fabrica_nueva():
     if request.method == "POST":
         try:
-            nombre = request.form.get("nombre", "").strip()
-            ingredientes = request.form.getlist("ingredientes")
-            refresco = request.form.get("refresco", "")
-            precio = request.form.get("precio", "0")
-
-            if not nombre:
-                raise ValueError("El nombre de la pizza es obligatorio.")
-            if len(ingredientes) < MIN_INGREDIENTES or len(ingredientes) > MAX_INGREDIENTES:
-                raise ValueError(
-                    f"Debe seleccionar entre {MIN_INGREDIENTES} y {MAX_INGREDIENTES} ingredientes."
-                )
-            precio = float(precio)
-            if precio <= 0:
-                raise ValueError("El precio debe ser mayor a cero.")
+            nombre, ingredientes, refresco, precio = _pizza_fields_from_form()
 
             ok, last_id, error = database.replicate_write(
                 "INSERT INTO pizzas (nombre, ingredientes, refresco, precio) VALUES (?,?,?,?)",
@@ -131,20 +167,7 @@ def fabrica_editar(pizza_id):
 
     if request.method == "POST":
         try:
-            nombre = request.form.get("nombre", "").strip()
-            ingredientes = request.form.getlist("ingredientes")
-            refresco = request.form.get("refresco", "")
-            precio = request.form.get("precio", "0")
-
-            if not nombre:
-                raise ValueError("El nombre de la pizza es obligatorio.")
-            if len(ingredientes) < MIN_INGREDIENTES or len(ingredientes) > MAX_INGREDIENTES:
-                raise ValueError(
-                    f"Debe seleccionar entre {MIN_INGREDIENTES} y {MAX_INGREDIENTES} ingredientes."
-                )
-            precio = float(precio)
-            if precio <= 0:
-                raise ValueError("El precio debe ser mayor a cero.")
+            nombre, ingredientes, refresco, precio = _pizza_fields_from_form()
 
             ok, _, error = database.replicate_write(
                 "UPDATE pizzas SET nombre=?, ingredientes=?, refresco=?, precio=? WHERE id=?",
@@ -173,6 +196,18 @@ def fabrica_editar(pizza_id):
 
 @app.route("/fabrica/eliminar/<int:pizza_id>", methods=["POST"])
 def fabrica_eliminar(pizza_id):
+    try:
+        conn = database.get_local_conn()
+        pizza_count = conn.execute("SELECT COUNT(*) FROM pizzas").fetchone()[0]
+        conn.close()
+    except sqlite3.Error as e:
+        flash(f"Error al comprobar el catálogo: {e}", "danger")
+        return redirect(url_for("fabrica"))
+
+    if pizza_count <= 5:
+        flash("El catálogo debe conservar al menos cinco combos.", "warning")
+        return redirect(url_for("fabrica"))
+
     ok, _, error = database.replicate_write("DELETE FROM pizzas WHERE id=?", (pizza_id,))
     if not ok:
         flash(f"Error al eliminar: {error}", "danger")
@@ -202,6 +237,21 @@ def pedidos():
         flash(f"Error al cargar datos: {e}", "danger")
         pizzas, lista_pedidos = [], []
 
+    selected_pizza_id = (
+        request.form.get("pizza_id", "")
+        if request.method == "POST"
+        else request.args.get("pizza_id", "")
+    )
+    try:
+        selected_pizza_id = int(selected_pizza_id) if selected_pizza_id else None
+    except ValueError:
+        selected_pizza_id = None
+        flash("La pizza solicitada no es válida; selecciona una opción del menú.", "warning")
+
+    pizza_ids = {pizza["id"] for pizza in pizzas}
+    if selected_pizza_id not in pizza_ids:
+        selected_pizza_id = pizzas[0]["id"] if pizzas else None
+
     if request.method == "POST":
         try:
             cliente = request.form.get("cliente", "").strip()
@@ -213,8 +263,14 @@ def pedidos():
 
             if not cliente or not correo_cliente:
                 raise ValueError("Debe indicar nombre y correo del cliente.")
+            if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", correo_cliente):
+                raise ValueError("Indique un correo electrónico válido.")
             if cantidad < 1:
                 raise ValueError("La cantidad debe ser al menos 1.")
+            if refresco not in REFRESCOS_DISPONIBLES:
+                raise ValueError("Seleccione un refresco válido.")
+            if retiro_o_flete not in ("RETIRO EN SITIO", "FLETE A DOMICILIO"):
+                raise ValueError("Seleccione un método de entrega válido.")
 
             conn = database.get_local_conn()
             pizza = conn.execute("SELECT * FROM pizzas WHERE id=?", (pizza_id,)).fetchone()
@@ -244,18 +300,17 @@ def pedidos():
             }
             json_data, ruta_json = generar_json_pedido(pedido_dict)
 
-            # Confirmación al cliente
-            enviar_correo(
-                correo_cliente, f"Confirmación de pedido #{pedido_id} - CHINOS CAFÉ S.A.",
-                json_data, ruta_json
-            )
-            # Confirmación a la empresa / operario
-            enviar_correo(
-                EMPRESA_CORREO, f"Nuevo pedido #{pedido_id} recibido",
-                json_data, ruta_json
+            _notify_json_recipients(
+                (
+                    correo_cliente,
+                    EMPRESA_CORREO,
+                ),
+                f"Confirmación del pedido #{pedido_id} - CHINOS CAFÉ S.A.",
+                json_data,
+                ruta_json,
             )
 
-            flash(f"Pedido #{pedido_id} confirmado. Se envió el JSON de confirmación por correo.", "success")
+            flash(f"Pedido #{pedido_id} confirmado y guardado en ambas bases.", "success")
             return redirect(url_for("pedidos"))
 
         except (ValueError, RuntimeError, TypeError) as e:
@@ -264,6 +319,7 @@ def pedidos():
     return render_template(
         "pedidos.html", pizzas=pizzas, pedidos=lista_pedidos,
         refrescos_disponibles=REFRESCOS_DISPONIBLES,
+        selected_pizza_id=selected_pizza_id,
     )
 
 
@@ -277,7 +333,9 @@ def pagos():
         pedidos_pendientes = conn.execute(
             "SELECT pedidos.*, pizzas.nombre AS pizza_nombre FROM pedidos "
             "JOIN pizzas ON pedidos.pizza_id = pizzas.id "
-            "WHERE pedidos.estado != 'PAGADO' ORDER BY pedidos.id DESC"
+            "WHERE pedidos.estado NOT IN ('PAGADO', 'PAGADO - DESPACHAR (FLETE)') "
+            "AND NOT EXISTS (SELECT 1 FROM pagos WHERE pagos.pedido_id=pedidos.id) "
+            "ORDER BY pedidos.id DESC"
         ).fetchall()
         historial_pagos = conn.execute(
             "SELECT pagos.*, pedidos.cliente, pedidos.retiro_o_flete FROM pagos "
@@ -301,6 +359,15 @@ def pagos():
             conn.close()
             if pedido is None:
                 raise ValueError("El pedido indicado no existe.")
+            if pedido["estado"] in ("PAGADO", "PAGADO - DESPACHAR (FLETE)"):
+                raise ValueError("Este pedido ya fue pagado.")
+            conn = database.get_local_conn()
+            pago_existente = conn.execute(
+                "SELECT 1 FROM pagos WHERE pedido_id=?", (pedido_id,)
+            ).fetchone()
+            conn.close()
+            if pago_existente:
+                raise ValueError("Este pedido ya tiene un pago registrado.")
 
             ok_pago, referencia, error_pago = simular_pago_yappy(pedido["total"])
             if not ok_pago:
@@ -308,21 +375,22 @@ def pagos():
 
             fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-            ok, pago_id, error = database.replicate_write(
-                "INSERT INTO pagos (pedido_id, metodo, monto, estado, fecha) VALUES (?,?,?,?,?)",
-                (pedido_id, "YAPPY COMERCIAL", pedido["total"], "CONFIRMADO", fecha),
+            nuevo_estado = "PAGADO" if pedido["retiro_o_flete"] == "RETIRO EN SITIO" else "PAGADO - DESPACHAR (FLETE)"
+            ok, operation_ids, error = database.replicate_transaction(
+                [
+                    (
+                        "INSERT INTO pagos (pedido_id, metodo, monto, estado, fecha) "
+                        "VALUES (?,?,?,?,?)",
+                        (pedido_id, "YAPPY COMERCIAL", pedido["total"], "CONFIRMADO", fecha),
+                    ),
+                    ("UPDATE pedidos SET estado=? WHERE id=?", (nuevo_estado, pedido_id)),
+                ]
             )
             if not ok:
                 raise RuntimeError(error)
+            pago_id = operation_ids[0]
             if error:
                 flash(error, "warning")
-
-            nuevo_estado = "PAGADO" if pedido["retiro_o_flete"] == "RETIRO EN SITIO" else "PAGADO - DESPACHAR (FLETE)"
-            ok2, _, error2 = database.replicate_write(
-                "UPDATE pedidos SET estado=? WHERE id=?", (nuevo_estado, pedido_id)
-            )
-            if not ok2:
-                raise RuntimeError(error2)
 
             pago_dict = {
                 "id": pago_id, "pedido_id": pedido_id, "metodo": "YAPPY COMERCIAL (" + referencia + ")",
@@ -333,16 +401,13 @@ def pagos():
             }
             json_data, ruta_json = generar_json_pago(pago_dict, pedido_dict)
 
-            enviar_correo(
-                pedido["correo_cliente"], f"Confirmación de pago - Pedido #{pedido_id}",
-                json_data, ruta_json
-            )
-            enviar_correo(
-                EMPRESA_CORREO, f"Pago confirmado para pedido #{pedido_id} - despachar",
+            _notify_json_recipients(
+                (pedido["correo_cliente"], EMPRESA_CORREO),
+                f"Confirmación de pago - Pedido #{pedido_id}",
                 json_data, ruta_json
             )
 
-            flash(f"Pago del pedido #{pedido_id} confirmado (ref. {referencia}). Correo de confirmación enviado.", "success")
+            flash(f"Pago del pedido #{pedido_id} confirmado (ref. {referencia}).", "success")
             return redirect(url_for("pagos"))
 
         except (ValueError, RuntimeError, TypeError) as e:

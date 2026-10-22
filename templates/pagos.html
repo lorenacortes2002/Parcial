@@ -10,8 +10,8 @@
 {% if pedidos %}
 <div class="form-card">
 <form method="POST" class="form">
-  <label>Pedido pendiente de pago</label>
-  <select name="pedido_id" required>
+  <label for="pedido-id">Pedido pendiente de pago</label>
+  <select id="pedido-id" name="pedido_id" required>
     {% for pe in pedidos %}
       <option value="{{ pe.id }}">
         #{{ pe.id }} — {{ pe.cliente }} — {{ pe.pizza_nombre }} — ${{ "%.2f"|format(pe.total) }} — {{ pe.retiro_o_flete }}

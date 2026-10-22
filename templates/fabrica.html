@@ -7,7 +7,10 @@
     <h1>Fábrica de pizzas</h1>
     <p>Organiza las recetas y los combos disponibles en el menú.</p>
   </div>
-  <a class="btn" href="{{ url_for('fabrica_nueva') }}">+ Nueva pizza</a>
+  <div class="catalog-actions">
+    <span class="catalog-count"><strong>{{ pizzas|length }}</strong> combos disponibles <span>· mínimo 5</span></span>
+    <a class="btn" href="{{ url_for('fabrica_nueva') }}">+ Nueva pizza</a>
+  </div>
 </div>
 
 <div class="table-wrap">

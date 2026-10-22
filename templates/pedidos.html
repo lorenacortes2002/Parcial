@@ -7,41 +7,82 @@
   <p>Cuéntanos qué se te antoja. Nosotros nos encargamos del resto.</p>
 </div>
 
+<div class="order-layout">
 <div class="form-card">
 <form method="POST" class="form">
-  <label>Nombre del cliente</label>
-  <input type="text" name="cliente" required>
-
-  <label>Correo del cliente</label>
-  <input type="email" name="correo_cliente" required>
-
-  <label>Pizza (combo)</label>
-  <select name="pizza_id" required>
-    {% for p in pizzas %}
-      <option value="{{ p.id }}">{{ p.nombre }} — ${{ "%.2f"|format(p.precio) }}</option>
-    {% endfor %}
-  </select>
-
-  <label>Refresco</label>
-  <select name="refresco">
-    {% for r in refrescos_disponibles %}
-      <option value="{{ r }}">{{ r }}</option>
-    {% endfor %}
-  </select>
-
-  <label>Cantidad</label>
-  <input type="number" name="cantidad" min="1" value="1" required>
-
-  <label>Entrega</label>
-  <select name="retiro_o_flete">
-    <option value="RETIRO EN SITIO">Retiro en sitio</option>
-    <option value="FLETE A DOMICILIO">Flete a domicilio</option>
-  </select>
+  <div class="form-grid">
+    <div class="form-field">
+      <label for="cliente">Nombre del cliente</label>
+      <input id="cliente" type="text" name="cliente" autocomplete="name" required>
+    </div>
+    <div class="form-field">
+      <label for="correo-cliente">Correo del cliente</label>
+      <input id="correo-cliente" type="email" name="correo_cliente" autocomplete="email" required>
+    </div>
+    <div class="form-field">
+      <label for="pizza-id">Pizza (combo)</label>
+      <select id="pizza-id" name="pizza_id" required aria-describedby="pizza-help">
+        {% for p in pizzas %}
+          <option value="{{ p.id }}" data-price="{{ p.precio }}"
+            {% if p.id == selected_pizza_id %}selected{% endif %}>
+            {{ p.nombre }} — ${{ "%.2f"|format(p.precio) }}
+          </option>
+        {% endfor %}
+      </select>
+      <small id="pizza-help">Elige uno de nuestros combos recién preparados.</small>
+    </div>
+    <div class="form-field">
+      <label for="refresco">Refresco</label>
+      <select id="refresco" name="refresco">
+        {% for r in refrescos_disponibles %}
+          <option value="{{ r }}">{{ r }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-field">
+      <label for="cantidad">Cantidad</label>
+      <input id="cantidad" type="number" name="cantidad" min="1" value="1" required>
+    </div>
+    <div class="form-field">
+      <label for="entrega">Entrega</label>
+      <select id="entrega" name="retiro_o_flete">
+        <option value="RETIRO EN SITIO">Retiro en sitio</option>
+        <option value="FLETE A DOMICILIO">Flete a domicilio</option>
+      </select>
+    </div>
+  </div>
 
   <div class="form-actions">
     <button type="submit" class="btn">Confirmar pedido</button>
   </div>
 </form>
+</div>
+
+<aside class="order-summary" aria-labelledby="order-summary-title">
+  <p class="eyebrow">Tu selección</p>
+  <h2 id="order-summary-title">Resumen del pedido</h2>
+  <div class="summary-item">
+    <span>Combo</span>
+    <strong id="summary-pizza">Selecciona una pizza</strong>
+  </div>
+  <div class="summary-item">
+    <span>Precio por combo</span>
+    <strong id="summary-unit">$0.00</strong>
+  </div>
+  <div class="summary-item">
+    <span>Cantidad</span>
+    <strong id="summary-quantity">1</strong>
+  </div>
+  <div class="summary-item">
+    <span>Entrega</span>
+    <strong id="summary-delivery">Retiro en sitio</strong>
+  </div>
+  <div class="summary-total">
+    <span>Total estimado</span>
+    <strong id="summary-total" aria-live="polite">$0.00</strong>
+  </div>
+  <p class="summary-footnote">El total se calcula con el precio del combo seleccionado. El flete no tiene costo definido en este prototipo.</p>
+</aside>
 </div>
 
 <h2 class="section-title">Pedidos recientes</h2>
@@ -68,4 +109,7 @@
   </tbody>
 </table>
 </div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='order.js') }}" defer></script>
 {% endblock %}

@@ -9,11 +9,11 @@
 
 <div class="form-card">
 <form method="POST" class="form">
-  <label>Nombre de la pizza</label>
-  <input type="text" name="nombre" required value="{{ pizza.nombre if pizza else '' }}">
+  <label for="nombre">Nombre de la pizza</label>
+  <input id="nombre" type="text" name="nombre" required value="{{ pizza.nombre if pizza else '' }}">
 
-  <label>Ingredientes (seleccione entre {{ min_ing }} y {{ max_ing }})</label>
-  <select name="ingredientes" multiple size="8" required>
+  <label for="ingredientes">Ingredientes (seleccione entre {{ min_ing }} y {{ max_ing }})</label>
+  <select id="ingredientes" name="ingredientes" multiple size="8" required>
     {% for ing in ingredientes_disponibles %}
       <option value="{{ ing }}"
         {% if ingredientes_actuales and ing in ingredientes_actuales %}selected{% endif %}>
@@ -23,15 +23,15 @@
   </select>
   <small>Mantenga Ctrl (o Cmd) presionado para seleccionar varios.</small>
 
-  <label>Refresco</label>
-  <select name="refresco">
+  <label for="refresco">Refresco</label>
+  <select id="refresco" name="refresco">
     {% for r in refrescos_disponibles %}
       <option value="{{ r }}" {% if pizza and pizza.refresco == r %}selected{% endif %}>{{ r }}</option>
     {% endfor %}
   </select>
 
-  <label>Precio (USD)</label>
-  <input type="number" step="0.01" min="0.01" name="precio" required
+  <label for="precio">Precio (USD)</label>
+  <input id="precio" type="number" step="0.01" min="0.01" name="precio" required
          value="{{ pizza.precio if pizza else '' }}">
 
   <div class="form-actions">
