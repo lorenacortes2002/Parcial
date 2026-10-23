@@ -40,7 +40,12 @@ Abrir **http://127.0.0.1:5000**
   la cantidad y sus sodas (cantidad, tamaño y sabores), pulsa «Agregar al pedido» y repite con
   otros productos; cada línea se puede quitar. Las sodas tienen precio por tamaño (lata $1.00,
   botella 20 oz $1.50, 1 litro $2.25, 2 litros $3.00); cada combo incluye una lata, así que con un
-  tamaño mayor se paga la diferencia y las sodas extra se cobran completas. Al confirmar, el pedido
+  tamaño mayor se paga la diferencia y las sodas extra se cobran completas.
+  Cada pizza puede llevar un **borde** (como en Domino's): clásico (incluido), ajo y parmesano
+  (+$1.00), relleno de queso (+$1.50) o relleno de pepperoni (+$2.00); el precio es por pizza, así
+  que en un combo de 2 pizzas se cobra dos veces. Si el pedido es **a domicilio** se suma un
+  **flete del 5%** del subtotal de los productos (se guarda en `pedidos.subtotal`, `pedidos.flete`
+  y `pedidos.total`). Al confirmar, el pedido
   y sus productos (`pedido_items`) se guardan en `db_local.sqlite3`, se **replican** en
   `db_replica.sqlite3`. Su JSON se guarda en la base de datos (columna `pedidos.json_pedido`, también
   replicada); no se crean archivos JSON. El correo **no** se envía todavía: se envía al confirmarse el pago.

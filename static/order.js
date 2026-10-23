@@ -131,6 +131,14 @@ if (orderForm) {
     }
   };
 
+  // --- Borde: precio por pizza (los combos de 2 pizzas llevan dos bordes) --
+  const crustRadios = [...document.querySelectorAll('input[name="borde"]')];
+  const crustNote = document.querySelector("#crust-note");
+  const selectedCrust = () => crustRadios.find((r) => r.checked) ?? crustRadios[0];
+  const pizzasPerProduct = () => (selectedProduct()?.dataset.tipo === "DUO" ? 2 : 1);
+  const crustPrice = () =>
+    Number(selectedCrust()?.dataset.price ?? 0) * quantity() * pizzasPerProduct();
+
   // --- Vista previa del producto que se va a agregar -----------------------
   const summaryPizza = document.querySelector("#summary-pizza");
   const summaryUnit = document.querySelector("#summary-unit");
@@ -138,17 +146,24 @@ if (orderForm) {
   const summarySodas = document.querySelector("#summary-sodas");
   const summarySodasPrice = document.querySelector("#summary-sodas-price");
   const summaryTotal = document.querySelector("#summary-total");
+  const summaryCrust = document.querySelector("#summary-crust");
+  const summaryCrustPrice = document.querySelector("#summary-crust-price");
 
   const updatePreview = () => {
     const option = selectedProduct();
     const unitPrice = Number(option?.dataset.price ?? 0);
     const sodas = sodasPrice();
+    const crust = crustPrice();
+    crustNote.hidden = pizzasPerProduct() === 1;
+    summaryCrust.textContent =
+      selectedCrust()?.closest(".crust-option").querySelector("strong").textContent ?? "";
+    summaryCrustPrice.textContent = money(crust);
     summaryPizza.textContent = option?.textContent.split(" — ")[0].trim() ?? "—";
     summaryUnit.textContent = money(unitPrice);
     summaryQuantity.textContent = String(quantity());
     summarySodas.textContent = sodaSummary();
     summarySodasPrice.textContent = money(sodas);
-    summaryTotal.textContent = money(unitPrice * quantity() + sodas);
+    summaryTotal.textContent = money(unitPrice * quantity() + crust + sodas);
   };
 
   // --- Paso 2: entrega -----------------------------------------------------
@@ -179,6 +194,22 @@ if (orderForm) {
     addressField.hidden = !isDelivery;
     addressInput.required = isDelivery;
     addressInput.disabled = !isDelivery;
+    updateCartTotals(isDelivery);
+  };
+
+  // Flete a domicilio: un porcentaje del subtotal de los productos del pedido.
+  const cartTotals = document.querySelector("#cart-totals");
+  const updateCartTotals = (isDelivery) => {
+    if (!cartTotals) return;
+    // Se calcula en centavos para redondear igual que el servidor (1.335 → 1.34).
+    const subtotalCents = Math.round(Number(cartTotals.dataset.subtotal) * 100);
+    const subtotal = subtotalCents / 100;
+    const fee = isDelivery
+      ? Math.round(subtotalCents * Number(cartTotals.dataset.porcentajeFlete)) / 100
+      : 0;
+    document.querySelector("#cart-flete-row").hidden = !isDelivery;
+    document.querySelector("#cart-flete").textContent = money(fee);
+    document.querySelector("#cart-total").textContent = money(subtotal + fee);
   };
 
   // --- Eventos ------------------------------------------------------------
@@ -202,6 +233,7 @@ if (orderForm) {
   productChoices.forEach((choice) =>
     choice.querySelector("select").addEventListener("change", refreshAll)
   );
+  crustRadios.forEach((radio) => radio.addEventListener("change", updatePreview));
   quantityInput.addEventListener("input", () => {
     defaultSodaQty();
     distribute();

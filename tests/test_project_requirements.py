@@ -163,7 +163,12 @@ class ProjectRequirementsTests(unittest.TestCase):
         # Al confirmar el pedido su JSON ya queda guardado en ambas bases.
         for path in (self.local_path, self.replica_path):
             stored = self._rows(path, "SELECT json_pedido FROM pedidos")[0][0]
-            self.assertEqual(json.loads(stored)["total"], 15.0)
+            # 2 × 7.50 = 15.00 + flete a domicilio (5%) 0.75 = 15.75
+            stored_json = json.loads(stored)
+            self.assertEqual(
+                (stored_json["subtotal"], stored_json["flete"], stored_json["total"]),
+                (15.0, 0.75, 15.75),
+            )
 
         order = self._rows(
             self.local_path,
@@ -171,7 +176,7 @@ class ProjectRequirementsTests(unittest.TestCase):
         )[0]
         self.assertEqual(
             order[1:],
-            (15.0, "CONFIRMADO", "FLETE A DOMICILIO",
+            (15.75, "CONFIRMADO", "FLETE A DOMICILIO",
              "David, Barrio Bolívar, calle 3, casa 24"),
         )
         self.assertEqual(
@@ -250,7 +255,7 @@ class ProjectRequirementsTests(unittest.TestCase):
                 self._rows(
                     path, "SELECT pedido_id, metodo, monto FROM pagos"
                 ),
-                [(order[0], "YAPPY COMERCIAL", 15.0)],
+                [(order[0], "YAPPY COMERCIAL", 15.75)],
             )
             self.assertEqual(
                 self._rows(path, "SELECT estado FROM pedidos WHERE id=?", (order[0],)),
@@ -724,6 +729,78 @@ class ProjectRequirementsTests(unittest.TestCase):
         self.assertFalse(hasattr(utils, "PEDIDOS_JSON_DIR"))
         self.assertFalse(hasattr(utils, "PAGOS_JSON_DIR"))
         self.assertEqual(self._order_json()["tipo"], "CONFIRMACION_PEDIDO")
+
+    def test_crusts_are_priced_per_pizza(self):
+        ids = {
+            (nombre, tipo): pid for pid, nombre, tipo in
+            self._rows(self.local_path, "SELECT id, nombre, tipo FROM pizzas")
+        }
+        base = {"refresco_cantidad": "0", "cliente": "Ana"}
+        # 2 pizzas Margarita con borde de queso: 2 × 5.50 + 2 × 1.50 = 14.00
+        self.client.post("/pedidos/agregar", data={
+            **base, "categoria": "PIZZA", "pizza_id": str(ids[("Margarita", "PIZZA")]),
+            "cantidad": "2", "borde": "QUESO",
+        })
+        # 1 dúo con borde de pepperoni en sus 2 pizzas: 12.50 + 2 × 2.00 = 16.50
+        self.client.post("/pedidos/agregar", data={
+            **base, "categoria": "COMBO", "cantidad": "1", "borde": "PEPPERONI",
+            "pizza_id": str(ids[("Dúo Margarita + Pepperoni", "DUO")]),
+        })
+        # Sin borde elegido = borde clásico, sin costo: 7.75
+        self.client.post("/pedidos/agregar", data={
+            **base, "categoria": "COMBO", "cantidad": "1",
+            "pizza_id": str(ids[("Hawaiana", "COMBO")]),
+        })
+        bad = self.client.post("/pedidos/agregar", data={
+            **base, "categoria": "PIZZA", "cantidad": "1", "borde": "DIAMANTE",
+            "pizza_id": str(ids[("Margarita", "PIZZA")]),
+        }, follow_redirects=True)
+        self.assertIn("borde válido".encode(), bad.data)
+
+        page = self.client.get("/pedidos").get_data(as_text=True)
+        self.assertIn("Relleno de queso", page)
+        self.assertIn("$38.25", page)  # 14.00 + 16.50 + 7.75
+
+        self.client.post("/pedidos", data={
+            "cliente": "Ana", "correo_cliente": "ana@example.com",
+            "retiro_o_flete": "RETIRO EN SITIO",
+        })
+        self.assertEqual(
+            self._rows(self.local_path, "SELECT subtotal, flete, total, detalle FROM pedidos"),
+            [(38.25, 0.0, 38.25,
+              "2× Pizza Margarita (Relleno de queso), "
+              "1× Dúo Margarita + Pepperoni (Relleno de pepperoni), 1× Combo Hawaiana")],
+        )
+        for path in (self.local_path, self.replica_path):
+            self.assertEqual(
+                self._rows(path, "SELECT borde, precio_borde, subtotal FROM pedido_items ORDER BY id"),
+                [("QUESO", 3.0, 14.0), ("PEPPERONI", 4.0, 16.5), ("CLASICO", 0.0, 7.75)],
+            )
+        items = self._order_json()["items"]
+        self.assertEqual([i["borde"] for i in items],
+                         ["Relleno de queso", "Relleno de pepperoni", "Borde clásico"])
+
+    def test_home_delivery_adds_five_percent_fee(self):
+        pedido = {
+            "cliente": "Ana", "correo_cliente": "ana@example.com", "pizza_id": "4",
+            "cantidad": "3", "refresco_cantidad": "0",  # 3 × 8.90 = 26.70
+        }
+        self.client.post("/pedidos", data={
+            **pedido, "retiro_o_flete": "FLETE A DOMICILIO",
+            "direccion": "David, Barrio Bolívar, casa 24",
+        })
+        self.client.post("/pedidos", data={**pedido, "retiro_o_flete": "RETIRO EN SITIO"})
+        self.assertEqual(
+            self._rows(self.local_path, "SELECT subtotal, flete, total FROM pedidos ORDER BY id"),
+            [(26.7, 1.34, 28.04), (26.7, 0.0, 26.7)],  # 5% de 26.70 = 1.335 → 1.34
+        )
+        # El cobro Yappy usa el total con flete.
+        charge = self.client.post("/pagos", data={"pedido_id": "1"})
+        codigo = charge.headers["Location"].rsplit("/", 1)[-1]
+        self.assertEqual(
+            self._rows(self.local_path, "SELECT monto FROM cobros_yappy WHERE codigo=?", (codigo,)),
+            [(28.04,)],
+        )
 
     def test_unknown_yappy_code_is_handled(self):
         self.assertEqual(self.client.get("/yappy/pagar/CC-NOPE00").status_code, 404)

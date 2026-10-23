@@ -20,6 +20,7 @@ import math
 import re
 import sqlite3
 from datetime import datetime
+from decimal import Decimal, ROUND_HALF_UP
 
 from flask import (
     Flask, render_template, request, redirect, url_for, flash, jsonify, session,
@@ -470,6 +471,18 @@ def fabrica_eliminar(pizza_id):
 # ----------------------------------------------------------------------
 MAX_CANTIDAD_ITEM = 50
 MAX_ITEMS_CARRITO = 15
+
+# Bordes de la pizza (como en Domino's): nombre, precio por pizza y descripción.
+BORDES = {
+    "CLASICO": ("Borde clásico", 0.00, "Orilla tradicional, dorada y crujiente"),
+    "AJO": ("Ajo y parmesano", 1.00, "Orilla con mantequilla de ajo y parmesano"),
+    "QUESO": ("Relleno de queso", 1.50, "Orilla rellena de queso mozzarella"),
+    "PEPPERONI": ("Relleno de pepperoni", 2.00, "Orilla rellena de queso y pepperoni"),
+}
+BORDE_POR_DEFECTO = "CLASICO"
+
+# Flete por entrega a domicilio: porcentaje del subtotal de los productos.
+PORCENTAJE_FLETE = Decimal("0.05")
 CAMPOS_CLIENTE = ("cliente", "correo_cliente", "retiro_o_flete", "direccion")
 
 
@@ -488,6 +501,19 @@ def _precio_sodas(producto, cantidad, sodas_cantidad, sodas_tamano):
     extra = sodas_cantidad - incluidas
     diferencia = precio - PRECIOS_SODA[TAMANO_SODA_INCLUIDA]
     return round(incluidas * diferencia + extra * precio, 2)
+
+
+def _pizzas_por_producto(producto):
+    """Pizzas que lleva un producto: los combos de 2 pizzas llevan dos bordes."""
+    return 2 if producto["tipo"] == "DUO" else 1
+
+
+def _calcular_flete(subtotal, retiro_o_flete):
+    if retiro_o_flete != "FLETE A DOMICILIO":
+        return 0.0
+    # Decimal evita errores de redondeo: 5% de 26.70 = 1.335 → 1.34 (no 1.33).
+    flete = Decimal(str(subtotal)) * PORCENTAJE_FLETE
+    return float(flete.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
 def _nombre_en_pedido(producto):
@@ -514,9 +540,12 @@ def _item_from_form(productos_por_id):
         raise ValueError("La pizza seleccionada no existe.")
     if cantidad < 1 or cantidad > MAX_CANTIDAD_ITEM:
         raise ValueError(f"La cantidad debe estar entre 1 y {MAX_CANTIDAD_ITEM}.")
+    borde = request.form.get("borde", BORDE_POR_DEFECTO)
+    if borde not in BORDES:
+        raise ValueError("Seleccione un borde válido.")
     sodas_cantidad, sodas_tamano, sodas_detalle = _sodas_from_form()
     return {
-        "pizza_id": pizza_id, "cantidad": cantidad,
+        "pizza_id": pizza_id, "cantidad": cantidad, "borde": borde,
         "sodas_cantidad": sodas_cantidad, "sodas_tamano": sodas_tamano,
         "sodas_detalle": [list(par) for par in sodas_detalle],
     }
@@ -530,18 +559,28 @@ def _resolver_carrito(carrito, productos_por_id):
         if producto is None:
             continue  # el producto se eliminó del menú
         detalle = [tuple(par) for par in item["sodas_detalle"]]
+        borde = item.get("borde", BORDE_POR_DEFECTO)
         precio_pizzas = round(producto["precio"] * item["cantidad"], 2)
+        precio_borde = round(
+            BORDES[borde][1] * item["cantidad"] * _pizzas_por_producto(producto), 2
+        )
         precio_sodas = _precio_sodas(
             producto, item["cantidad"], item["sodas_cantidad"], item["sodas_tamano"]
         )
+        nombre = _nombre_en_pedido(producto)
         lineas.append({
             **item,
+            "borde": borde,
+            "borde_nombre": BORDES[borde][0],
             "producto": producto,
-            "nombre": _nombre_en_pedido(producto),
+            "nombre": nombre,
+            # En el detalle del pedido solo se menciona el borde si no es el clásico.
+            "descripcion": nombre if borde == BORDE_POR_DEFECTO else f"{nombre} ({BORDES[borde][0]})",
             "sodas": _describir_sodas(item["sodas_cantidad"], item["sodas_tamano"], detalle),
             "precio_pizzas": precio_pizzas,
+            "precio_borde": precio_borde,
             "precio_sodas": precio_sodas,
-            "subtotal": round(precio_pizzas + precio_sodas, 2),
+            "subtotal": round(precio_pizzas + precio_borde + precio_sodas, 2),
         })
     return lineas
 
@@ -596,7 +635,7 @@ def pedidos_agregar():
             )
         session["carrito"] = carrito + [item]
         linea = nuevo[-1]
-        flash(f"Agregado al pedido: {linea['cantidad']}× {linea['nombre']}.", "success")
+        flash(f"Agregado al pedido: {linea['cantidad']}× {linea['descripcion']}.", "success")
     except (ValueError, sqlite3.Error) as e:
         flash(f"No se pudo agregar: {e}", "danger")
     return redirect(url_for("pedidos") + "#tu-pedido")
@@ -674,9 +713,11 @@ def pedidos():
                     "El pedido mezcla productos solo para retiro y solo a domicilio."
                 )
 
-            total = round(sum(l["subtotal"] for l in lineas), 2)
+            subtotal = round(sum(l["subtotal"] for l in lineas), 2)
+            flete = _calcular_flete(subtotal, retiro_o_flete)
+            total = round(subtotal + flete, 2)
             fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            detalle = ", ".join(f"{l['cantidad']}× {l['nombre']}" for l in lineas)
+            detalle = ", ".join(f"{l['cantidad']}× {l['descripcion']}" for l in lineas)
             con_sodas = [l for l in lineas if l["sodas_cantidad"]]
             refresco = "; ".join(l["sodas"] for l in con_sodas) or "Ninguno"
             tamanos = {l["sodas_tamano"] for l in con_sodas}
@@ -684,12 +725,12 @@ def pedidos():
             ok, pedido_id, error = database.replicate_write(
                 "INSERT INTO pedidos (cliente, correo_cliente, pizza_id, refresco, "
                 "refresco_cantidad, refresco_tamano, "
-                "cantidad, total, estado, retiro_o_flete, direccion, fecha, detalle) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "cantidad, subtotal, flete, total, estado, retiro_o_flete, direccion, fecha, "
+                "detalle) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (cliente, correo_cliente, lineas[0]["pizza_id"], refresco,
                  sum(l["sodas_cantidad"] for l in lineas),
                  tamanos.pop() if len(tamanos) == 1 else None,
-                 sum(l["cantidad"] for l in lineas), total,
+                 sum(l["cantidad"] for l in lineas), subtotal, flete, total,
                  "CONFIRMADO", retiro_o_flete, direccion, fecha, detalle),
             )
             if not ok:
@@ -711,11 +752,13 @@ def pedidos():
                     {
                         "producto": l["nombre"], "tipo": l["producto"]["tipo"],
                         "cantidad": l["cantidad"], "precio_unitario": l["producto"]["precio"],
+                        "borde": l["borde_nombre"], "precio_borde": l["precio_borde"],
                         "sodas": l["sodas"], "precio_sodas": l["precio_sodas"],
                         "subtotal": l["subtotal"],
                     }
                     for l in lineas
                 ],
+                "subtotal": subtotal, "flete": flete,
                 "total": total, "retiro_o_flete": retiro_o_flete,
                 "direccion": direccion, "estado": "CONFIRMADO", "fecha": fecha,
             }
@@ -727,9 +770,10 @@ def pedidos():
                 *[
                     (
                         "INSERT INTO pedido_items (pedido_id, pizza_id, cantidad, precio_unitario, "
-                        "sodas, sodas_cantidad, sodas_tamano, precio_sodas, subtotal) "
-                        "VALUES (?,?,?,?,?,?,?,?,?)",
+                        "borde, precio_borde, sodas, sodas_cantidad, sodas_tamano, precio_sodas, "
+                        "subtotal) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                         (pedido_id, l["pizza_id"], l["cantidad"], l["producto"]["precio"],
+                         l["borde"], l["precio_borde"],
                          l["sodas"], l["sodas_cantidad"], l["sodas_tamano"],
                          l["precio_sodas"], l["subtotal"]),
                     )
@@ -785,6 +829,8 @@ def pedidos():
         categoria=categoria, selected_pizza_id=selected_pizza_id,
         pedidos=lista_pedidos, entregas_pizza=ENTREGAS_PIZZA,
         carrito=lineas, total_carrito=round(sum(l["subtotal"] for l in lineas), 2),
+        bordes=BORDES, borde_por_defecto=BORDE_POR_DEFECTO,
+        porcentaje_flete=PORCENTAJE_FLETE,
         entrega_carrito=_entrega_permitida(lineas) if lineas else "",
         sabores_soda=SABORES_SODA, tamanos_soda=TAMANOS_SODA, precios_soda=PRECIOS_SODA,
         tamano_incluido=TAMANO_SODA_INCLUIDA, max_sodas=MAX_SODAS,

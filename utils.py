@@ -76,6 +76,8 @@ def generar_json_pedido(pedido):
         "refrescos_detalle": pedido.get("refrescos_detalle", []),
         "items": pedido.get("items", []),
         "cantidad": pedido["cantidad"],
+        "subtotal": pedido.get("subtotal"),
+        "flete": pedido.get("flete", 0),
         "total": pedido["total"],
         "retiro_o_flete": pedido["retiro_o_flete"],
         "direccion": pedido.get("direccion"),

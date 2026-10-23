@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS pedidos (
     refresco_cantidad INTEGER NOT NULL DEFAULT 1,
     refresco_tamano TEXT,
     cantidad INTEGER NOT NULL DEFAULT 1,
+    subtotal REAL,                              -- productos (sin flete)
+    flete REAL NOT NULL DEFAULT 0,              -- 5% del subtotal si es a domicilio
     total REAL NOT NULL,
     estado TEXT NOT NULL DEFAULT 'PENDIENTE',   -- PENDIENTE / CONFIRMADO / PAGADO / DESPACHADO
     retiro_o_flete TEXT NOT NULL DEFAULT 'RETIRO EN SITIO',
@@ -73,6 +75,8 @@ CREATE TABLE IF NOT EXISTS pedido_items (
     pizza_id INTEGER NOT NULL,
     cantidad INTEGER NOT NULL,
     precio_unitario REAL NOT NULL,
+    borde TEXT NOT NULL DEFAULT 'CLASICO',      -- CLASICO / AJO / QUESO / PEPPERONI
+    precio_borde REAL NOT NULL DEFAULT 0,
     sodas TEXT NOT NULL DEFAULT 'Ninguno',      -- p. ej. "2× Coca-Cola (Lata 12 oz)"
     sodas_cantidad INTEGER NOT NULL DEFAULT 0,
     sodas_tamano TEXT,
@@ -112,6 +116,15 @@ def _migrate(conn):
         conn.execute("ALTER TABLE pedidos ADD COLUMN detalle TEXT")
     if "json_pedido" not in columnas:
         conn.execute("ALTER TABLE pedidos ADD COLUMN json_pedido TEXT")
+    if "subtotal" not in columnas:
+        conn.execute("ALTER TABLE pedidos ADD COLUMN subtotal REAL")
+    if "flete" not in columnas:
+        conn.execute("ALTER TABLE pedidos ADD COLUMN flete REAL NOT NULL DEFAULT 0")
+    items = {row["name"] for row in conn.execute("PRAGMA table_info(pedido_items)")}
+    if "borde" not in items:
+        conn.execute("ALTER TABLE pedido_items ADD COLUMN borde TEXT NOT NULL DEFAULT 'CLASICO'")
+    if "precio_borde" not in items:
+        conn.execute("ALTER TABLE pedido_items ADD COLUMN precio_borde REAL NOT NULL DEFAULT 0")
     if "json_pago" not in {row["name"] for row in conn.execute("PRAGMA table_info(pagos)")}:
         conn.execute("ALTER TABLE pagos ADD COLUMN json_pago TEXT")
     columnas = {row["name"] for row in conn.execute("PRAGMA table_info(pizzas)")}

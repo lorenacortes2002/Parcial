@@ -71,6 +71,25 @@
         </div>
       </div>
 
+      <fieldset class="crust-picker" id="crust-picker">
+        <legend>🧀 Borde de la pizza</legend>
+        <p id="crust-note" class="crust-note" hidden>En los combos de 2 pizzas el borde se aplica (y se cobra) a las dos pizzas.</p>
+        <div class="crust-options">
+          {% for valor, (nombre, precio, detalle) in bordes.items() %}
+            <label class="crust-option">
+              <input type="radio" name="borde" value="{{ valor }}" data-price="{{ precio }}"
+                {% if form.get('borde', borde_por_defecto) == valor %}checked{% endif %}>
+              <span class="crust-option__art crust-option__art--{{ valor|lower }}" aria-hidden="true"></span>
+              <span class="crust-option__text">
+                <strong>{{ nombre }}</strong>
+                <small>{{ detalle }}</small>
+              </span>
+              <span class="crust-option__price">{{ 'Incluido' if precio == 0 else '+$%.2f' % precio }}</span>
+            </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+
         <fieldset class="soda-picker" id="soda-picker">
           <legend>🥤 Sodas</legend>
           <p id="soda-note" class="soda-note"
@@ -125,6 +144,7 @@
         <dl class="item-preview" aria-live="polite">
           <div><dt>Producto</dt><dd id="summary-pizza">—</dd></div>
           <div><dt>Pizzas</dt><dd><span id="summary-unit">$0.00</span> × <span id="summary-quantity">1</span></dd></div>
+          <div><dt>Borde</dt><dd><span id="summary-crust">Borde clásico</span> · <span id="summary-crust-price">$0.00</span></dd></div>
           <div><dt>Sodas</dt><dd><span id="summary-sodas">Ninguna</span> · <span id="summary-sodas-price">$0.00</span></dd></div>
         </dl>
         <div class="item-footer__action">
@@ -182,7 +202,7 @@
     </div>
     <p class="summary-footnote">
       {% if carrito %}Se confirmarán los productos de «Tu pedido».{% else %}Si no agregas nada, se confirmará el producto elegido en el paso 1.{% endif %}
-      El flete no tiene costo definido en este prototipo.
+      El envío a domicilio tiene un flete del {{ (porcentaje_flete * 100)|round|int }}% del subtotal de los productos.
     </p>
   </div>
 </div>
@@ -202,6 +222,7 @@
             <span>${{ "%.2f"|format(linea.subtotal) }}</span>
           </div>
           <small>🍕 Pizzas ${{ "%.2f"|format(linea.precio_pizzas) }}</small>
+          <small>🧀 {{ linea.borde_nombre }}{% if linea.precio_borde %} · ${{ "%.2f"|format(linea.precio_borde) }}{% endif %}</small>
           <small>🥤 {{ linea.sodas if linea.sodas_cantidad else 'Sin sodas' }}
             {% if linea.sodas_cantidad %}· ${{ "%.2f"|format(linea.precio_sodas) }}{% endif %}</small>
           <button type="submit" class="cart-line__remove"
@@ -210,6 +231,14 @@
         </li>
       {% endfor %}
     </ul>
+    <dl class="cart-totals" id="cart-totals" data-subtotal="{{ total_carrito }}"
+      data-porcentaje-flete="{{ porcentaje_flete }}">
+      <div><dt>Subtotal</dt><dd>${{ "%.2f"|format(total_carrito) }}</dd></div>
+      <div id="cart-flete-row" hidden>
+        <dt>Flete a domicilio ({{ (porcentaje_flete * 100)|round|int }}%)</dt>
+        <dd id="cart-flete">$0.00</dd>
+      </div>
+    </dl>
     <div class="summary-total">
       <span>Total del pedido</span>
       <strong id="cart-total">${{ "%.2f"|format(total_carrito) }}</strong>
