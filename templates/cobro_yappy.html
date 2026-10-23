@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Cobro {{ cobro.codigo }} · CHINOS CAFÉ{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <p class="eyebrow">Cobro Yappy · Pedido #{{ pedido.id }}</p>
+  <h1>{% if cobro.estado == 'PAGADO' %}Pago recibido{% else %}Esperando el pago{% endif %}</h1>
+  <p>{{ pedido.cliente }} · {{ pedido.cantidad }} × {{ pedido.pizza_nombre }} · {{ pedido.retiro_o_flete }}</p>
+</div>
+
+<div id="pago-confirmado" class="payment-success" {% if cobro.estado != 'PAGADO' %}hidden{% endif %}
+  role="status" aria-live="polite">
+  <span class="payment-success__icon" aria-hidden="true">✓</span>
+  <div>
+    <h2>¡Pago confirmado!</h2>
+    <p>
+      Se recibieron <strong>${{ "%.2f"|format(cobro.monto) }}</strong> por el cobro
+      <code>{{ cobro.codigo }}</code>.
+      Transacción Yappy: <strong id="pago-referencia">{{ cobro.referencia or '' }}</strong>
+    </p>
+    <p>
+      {% if pedido.retiro_o_flete == 'FLETE A DOMICILIO' %}
+        El pedido pasa a despacho a domicilio: <strong>{{ pedido.direccion }}</strong>.
+      {% else %}
+        El pedido está listo para retiro en sitio.
+      {% endif %}
+    </p>
+    <div class="form-actions">
+      <a class="btn" href="{{ url_for('pagos') }}">Volver a pagos</a>
+    </div>
+  </div>
+</div>
+
+<div id="pago-pendiente" class="payment-layout" {% if cobro.estado == 'PAGADO' %}hidden{% endif %}>
+  <section class="payment-card" aria-labelledby="qr-title">
+    <p class="eyebrow">Opción 1</p>
+    <h2 id="qr-title">Escanea el código QR</h2>
+    <div class="qr-box">{{ qr|safe }}</div>
+    <p class="muted">Abre la cámara o la app de Yappy y escanea el código. Se abrirá la pantalla para pagar este pedido.</p>
+    <a class="small-link" href="{{ url_pago }}" target="_blank" rel="noopener">Abrir el enlace de pago en otra pestaña</a>
+  </section>
+
+  <section class="payment-card" aria-labelledby="numero-title">
+    <p class="eyebrow">Opción 2</p>
+    <h2 id="numero-title">Envía al número Yappy</h2>
+    <dl class="payment-data">
+      <div><dt>Número</dt><dd class="payment-big">{{ yappy_telefono }}</dd></div>
+      <div><dt>Directorio</dt><dd>{{ yappy_directorio }}</dd></div>
+      <div><dt>Monto exacto</dt><dd class="payment-big">${{ "%.2f"|format(cobro.monto) }}</dd></div>
+      <div><dt>Mensaje / código</dt><dd><code class="payment-code">{{ cobro.codigo }}</code></dd></div>
+    </dl>
+    <p class="muted">Escribe el código <strong>{{ cobro.codigo }}</strong> en el mensaje del pago para identificar tu pedido.</p>
+
+    <form method="POST" class="form payment-manual">
+      <label for="referencia">N.º de transacción recibido (caja)</label>
+      <input id="referencia" name="referencia" required pattern="[A-Za-z0-9\-]{4,30}"
+        placeholder="Ej.: 7H3K9P2M" autocomplete="off">
+      <small>Cuando llegue el pago con el código {{ cobro.codigo }}, anota el número de transacción para confirmarlo.</small>
+      <div class="form-actions">
+        <button type="submit" class="btn">Confirmar pago recibido</button>
+      </div>
+    </form>
+  </section>
+</div>
+
+<p id="estado-espera" class="waiting" {% if cobro.estado == 'PAGADO' %}hidden{% endif %}>
+  <span class="waiting__dot" aria-hidden="true"></span>
+  Esta pantalla se actualiza sola en cuanto se realiza el pago con el código QR.
+</p>
+{% endblock %}
+{% block scripts %}
+{% if cobro.estado != 'PAGADO' %}
+<script>
+  (() => {
+    const statusUrl = "{{ url_for('cobro_yappy_estado', codigo=cobro.codigo) }}";
+    const timer = setInterval(async () => {
+      try {
+        const response = await fetch(statusUrl, { cache: "no-store" });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (data.estado !== "PAGADO") return;
+        clearInterval(timer);
+        // Recarga para mostrar la confirmación con los avisos del servidor.
+        window.location.reload();
+      } catch (error) {
+        // Sin conexión momentánea: se reintenta en el siguiente ciclo.
+      }
+    }, 2500);
+  })();
+</script>
+{% endif %}
+{% endblock %}

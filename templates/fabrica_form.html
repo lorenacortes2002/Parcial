@@ -12,16 +12,27 @@
   <label for="nombre">Nombre de la pizza</label>
   <input id="nombre" type="text" name="nombre" required value="{{ pizza.nombre if pizza else '' }}">
 
-  <label for="ingredientes">Ingredientes (seleccione entre {{ min_ing }} y {{ max_ing }})</label>
-  <select id="ingredientes" name="ingredientes" multiple size="8" required>
-    {% for ing in ingredientes_disponibles %}
-      <option value="{{ ing }}"
-        {% if ingredientes_actuales and ing in ingredientes_actuales %}selected{% endif %}>
-        {{ ing }}
-      </option>
-    {% endfor %}
-  </select>
-  <small>Mantenga Ctrl (o Cmd) presionado para seleccionar varios.</small>
+  <fieldset class="ingredient-picker" id="ingredient-picker"
+    data-min="{{ min_ing }}" data-max="{{ max_ing }}" aria-describedby="ingredient-help">
+    <legend>Ingredientes (seleccione entre {{ min_ing }} y {{ max_ing }})</legend>
+    <div class="ingredient-grid">
+      {% for ing in ingredientes_disponibles %}
+        <label class="ingredient-tile">
+          <input type="checkbox" name="ingredientes" value="{{ ing }}"
+            {% if ingredientes_actuales and ing in ingredientes_actuales %}checked{% endif %}>
+          <span class="ingredient-tile__check" aria-hidden="true"></span>
+          <span class="ingredient-tile__name">{{ ing }}</span>
+        </label>
+      {% endfor %}
+    </div>
+    <div class="ingredient-selected">
+      <small id="ingredient-help">
+        Haz clic en cada ingrediente para añadirlo; vuelve a hacer clic para quitarlo.
+        <strong id="ingredient-count">0 / {{ max_ing }}</strong>
+      </small>
+      <ul id="ingredient-list" class="ingredient-list" aria-live="polite"></ul>
+    </div>
+  </fieldset>
 
   <label for="refresco">Refresco</label>
   <select id="refresco" name="refresco">
@@ -40,4 +51,7 @@
   </div>
 </form>
 </div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='ingredients.js') }}" defer></script>
 {% endblock %}

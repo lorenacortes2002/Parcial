@@ -36,9 +36,19 @@ Abrir **http://127.0.0.1:5000**
 - `/pedidos` → El cliente arma su combo; se guarda en `db_local.sqlite3`, se **replica** en
   `db_replica.sqlite3`, se genera un JSON en `pedidos_json/` y se intenta enviar por correo
   (si no hay servidor SMTP configurado, queda registrado en `correos_enviados.log`; el sitio avisa que no se envió).
-- `/pagos` → Confirma el pago (simulación Yappy Comercial), genera el JSON en `pagos_json/`
-  y actualiza el estado del pedido a `PAGADO` (o `PAGADO - DESPACHAR (FLETE)` si eligió flete).
-  Un pedido pagado no se puede cobrar una segunda vez.
+  Si se elige **Flete a domicilio** aparece el campo **Dirección de entrega**, que es obligatorio
+  y se guarda en el pedido, su JSON y los correos.
+- `/pagos` → Genera un **cobro Yappy** con un código único (p. ej. `CC-7K3P9Q`) y abre
+  `/pagos/yappy/<código>`, que ofrece dos formas de pago:
+  1. **Código QR**: al escanearlo con el celular se abre `/yappy/pagar/<código>` (simulador de la app
+     Yappy); al pulsar «Pagar» el pago queda confirmado y la pantalla de caja muestra
+     «¡Pago confirmado!» automáticamente.
+  2. **Número Yappy**: el cliente envía el monto al número del comercio con el código en el mensaje;
+     el cajero anota el número de transacción recibido y confirma.
+  Al confirmar se genera el JSON en `pagos_json/` y el pedido pasa a `PAGADO`
+  (o `PAGADO - DESPACHAR (FLETE)` si eligió flete). Un pedido pagado no se puede cobrar dos veces.
+  El número y el nombre de directorio se configuran con `YAPPY_TELEFONO` y `YAPPY_DIRECTORIO`.
+  Para escanear el QR con un celular, este debe estar en la misma red Wi-Fi que la computadora.
 
 ### Pruebas del prototipo
 Con el entorno virtual activado, ejecutar:

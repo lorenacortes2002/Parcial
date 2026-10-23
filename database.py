@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS pedidos (
     total REAL NOT NULL,
     estado TEXT NOT NULL DEFAULT 'PENDIENTE',   -- PENDIENTE / CONFIRMADO / PAGADO / DESPACHADO
     retiro_o_flete TEXT NOT NULL DEFAULT 'RETIRO EN SITIO',
+    direccion TEXT,                             -- obligatoria solo si es FLETE A DOMICILIO
     fecha TEXT NOT NULL,
     FOREIGN KEY (pizza_id) REFERENCES pizzas(id)
 );
@@ -55,7 +56,34 @@ CREATE TABLE IF NOT EXISTS pagos (
     fecha TEXT NOT NULL,
     FOREIGN KEY (pedido_id) REFERENCES pedidos(id)
 );
+
+-- Cobros Yappy generados (QR / número) a la espera de que el cliente pague.
+CREATE TABLE IF NOT EXISTS cobros_yappy (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pedido_id INTEGER NOT NULL,
+    codigo TEXT NOT NULL UNIQUE,
+    monto REAL NOT NULL,
+    estado TEXT NOT NULL DEFAULT 'PENDIENTE',   -- PENDIENTE / PAGADO
+    referencia TEXT,                            -- n.º de transacción Yappy al pagar
+    fecha TEXT NOT NULL,
+    fecha_pago TEXT,
+    FOREIGN KEY (pedido_id) REFERENCES pedidos(id)
+);
 """
+
+
+def _migrate(conn):
+    """Actualiza bases creadas con versiones anteriores del esquema."""
+    columnas = {row["name"] for row in conn.execute("PRAGMA table_info(pedidos)")}
+    if "direccion" not in columnas:
+        conn.execute("ALTER TABLE pedidos ADD COLUMN direccion TEXT")
+    try:
+        # Un pedido solo puede tener un pago: evita cobros dobles simultáneos.
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_pagos_pedido ON pagos(pedido_id)"
+        )
+    except sqlite3.IntegrityError as e:
+        print(f"[AVISO DB] Hay pagos duplicados; no se creó el índice único: {e}")
 
 
 def _connect(path):
@@ -85,6 +113,7 @@ def init_db():
         try:
             conn = _connect(path)
             conn.executescript(SCHEMA)
+            _migrate(conn)
             conn.commit()
         except sqlite3.Error as e:
             print(f"[ERROR DB] No se pudo inicializar {path}: {e}")
@@ -101,8 +130,21 @@ def init_db():
             ("Hawaiana", "queso mozzarella,jamón,piña,salsa de tomate", "Sprite", 7.75),
             ("Vegetariana", "queso mozzarella,pimentón,cebolla,champiñones,aceitunas", "Agua", 7.25),
             ("Suprema Chinos", "queso mozzarella,pepperoni,jamón,champiñones,pimentón,cebolla", "Fanta", 8.90),
-            ("Cuatro Quesos", "mozzarella,parmesano,queso azul,gouda", "Coca-Cola Zero", 8.50),
+            ("Cuatro Quesos", "queso mozzarella,parmesano,queso azul,gouda", "Coca-Cola Zero", 8.50),
         ]
+        # Versiones anteriores guardaban "mozzarella", que no coincide con el
+        # ingrediente "queso mozzarella" del formulario de la Fábrica.
+        for row in conn.execute(
+            "SELECT id, ingredientes FROM pizzas WHERE ',' || ingredientes || ',' LIKE '%,mozzarella,%'"
+        ).fetchall():
+            corregidos = []
+            for ing in row["ingredientes"].split(","):
+                ing = "queso mozzarella" if ing == "mozzarella" else ing
+                if ing not in corregidos:
+                    corregidos.append(ing)
+            conn.execute(
+                "UPDATE pizzas SET ingredientes=? WHERE id=?", (",".join(corregidos), row["id"])
+            )
         existing_names = {
             row["nombre"] for row in conn.execute("SELECT nombre FROM pizzas").fetchall()
         }

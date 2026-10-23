@@ -15,21 +15,26 @@ Para producción (servidor Linux con NGINX) ver README.md
 
 import os
 import secrets
+import socket
 import math
 import re
 import sqlite3
 from datetime import datetime
 
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 
 import database
 from utils import (
     generar_json_pedido, generar_json_pago,
-    enviar_correo, simular_pago_yappy, EMPRESA_CORREO
+    enviar_correo, simular_pago_yappy, EMPRESA_CORREO,
+    generar_codigo_cobro, qr_svg, YAPPY_TELEFONO, YAPPY_DIRECTORIO,
 )
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
+
+MIN_DIRECCION = 10
+MAX_DIRECCION = 300
 
 MIN_INGREDIENTES = 2
 MAX_INGREDIENTES = 10
@@ -147,6 +152,7 @@ def fabrica_nueva():
         "fabrica_form.html", pizza=None,
         ingredientes_disponibles=INGREDIENTES_DISPONIBLES,
         refrescos_disponibles=REFRESCOS_DISPONIBLES,
+        ingredientes_actuales=request.form.getlist("ingredientes"),
         min_ing=MIN_INGREDIENTES, max_ing=MAX_INGREDIENTES,
     )
 
@@ -260,6 +266,7 @@ def pedidos():
             refresco = request.form.get("refresco", "")
             cantidad = int(request.form.get("cantidad", 1))
             retiro_o_flete = request.form.get("retiro_o_flete", "RETIRO EN SITIO")
+            direccion = " ".join(request.form.get("direccion", "").split())
 
             if not cliente or not correo_cliente:
                 raise ValueError("Debe indicar nombre y correo del cliente.")
@@ -271,6 +278,18 @@ def pedidos():
                 raise ValueError("Seleccione un refresco válido.")
             if retiro_o_flete not in ("RETIRO EN SITIO", "FLETE A DOMICILIO"):
                 raise ValueError("Seleccione un método de entrega válido.")
+            if retiro_o_flete == "FLETE A DOMICILIO":
+                if len(direccion) < MIN_DIRECCION:
+                    raise ValueError(
+                        "Para el envío a domicilio indique la dirección completa "
+                        "(barrio, calle, casa/apto y un punto de referencia)."
+                    )
+                if len(direccion) > MAX_DIRECCION:
+                    raise ValueError(
+                        f"La dirección no puede superar {MAX_DIRECCION} caracteres."
+                    )
+            else:
+                direccion = None
 
             conn = database.get_local_conn()
             pizza = conn.execute("SELECT * FROM pizzas WHERE id=?", (pizza_id,)).fetchone()
@@ -283,9 +302,10 @@ def pedidos():
 
             ok, pedido_id, error = database.replicate_write(
                 "INSERT INTO pedidos (cliente, correo_cliente, pizza_id, refresco, "
-                "cantidad, total, estado, retiro_o_flete, fecha) VALUES (?,?,?,?,?,?,?,?,?)",
+                "cantidad, total, estado, retiro_o_flete, direccion, fecha) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (cliente, correo_cliente, pizza_id, refresco, cantidad, total,
-                 "CONFIRMADO", retiro_o_flete, fecha),
+                 "CONFIRMADO", retiro_o_flete, direccion, fecha),
             )
             if not ok:
                 raise RuntimeError(error)
@@ -296,7 +316,7 @@ def pedidos():
                 "id": pedido_id, "cliente": cliente, "correo_cliente": correo_cliente,
                 "pizza_nombre": pizza["nombre"], "refresco": refresco, "cantidad": cantidad,
                 "total": total, "retiro_o_flete": retiro_o_flete,
-                "estado": "CONFIRMADO", "fecha": fecha,
+                "direccion": direccion, "estado": "CONFIRMADO", "fecha": fecha,
             }
             json_data, ruta_json = generar_json_pedido(pedido_dict)
 
@@ -320,14 +340,152 @@ def pedidos():
         "pedidos.html", pizzas=pizzas, pedidos=lista_pedidos,
         refrescos_disponibles=REFRESCOS_DISPONIBLES,
         selected_pizza_id=selected_pizza_id,
+        form=request.form if request.method == "POST" else {},
+        min_direccion=MIN_DIRECCION, max_direccion=MAX_DIRECCION,
     )
 
 
 # ----------------------------------------------------------------------
-# PAGOS — confirmación de pago (Yappy Comercial) y despacho al cliente.
+# PAGOS — cobro con Yappy Comercial:
+#   1. Se elige el pedido y se genera un cobro con código único.
+#   2. El cliente escanea el QR o envía el monto al número del comercio
+#      escribiendo el código en el mensaje.
+#   3. Al confirmarse, se registra el pago, se actualiza el pedido y se
+#      muestra la confirmación (la pantalla de caja se actualiza sola).
 # ----------------------------------------------------------------------
+ESTADOS_PAGADOS = ("PAGADO", "PAGADO - DESPACHAR (FLETE)")
+
+
+def _obtener_pedido(conn, pedido_id):
+    return conn.execute(
+        "SELECT pedidos.*, pizzas.nombre AS pizza_nombre FROM pedidos "
+        "JOIN pizzas ON pedidos.pizza_id = pizzas.id WHERE pedidos.id=?",
+        (pedido_id,),
+    ).fetchone()
+
+
+def _obtener_cobro(codigo):
+    conn = database.get_local_conn()
+    try:
+        cobro = conn.execute(
+            "SELECT * FROM cobros_yappy WHERE codigo=?", (codigo,)
+        ).fetchone()
+        pedido = _obtener_pedido(conn, cobro["pedido_id"]) if cobro else None
+        return cobro, pedido
+    finally:
+        conn.close()
+
+
+def _url_publica(endpoint, **values):
+    """
+    URL absoluta para el QR. Si la app se abrió como localhost, se usa la IP
+    de la red local para que un celular en la misma red Wi-Fi pueda abrirla.
+    """
+    url = url_for(endpoint, _external=True, **values)
+    host = request.host.split(":")[0]
+    if host in ("127.0.0.1", "localhost"):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("10.255.255.255", 1))
+                ip_lan = s.getsockname()[0]
+            url = url.replace(f"//{host}", f"//{ip_lan}", 1)
+        except OSError:
+            pass
+    return url
+
+
+def _confirmar_cobro(cobro, pedido, referencia):
+    """Registra el pago del cobro en ambas bases y envía las confirmaciones."""
+    if cobro["estado"] == "PAGADO" or pedido["estado"] in ESTADOS_PAGADOS:
+        raise ValueError("Este pedido ya fue pagado.")
+
+    fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    nuevo_estado = (
+        "PAGADO" if pedido["retiro_o_flete"] == "RETIRO EN SITIO"
+        else "PAGADO - DESPACHAR (FLETE)"
+    )
+    ok, operation_ids, error = database.replicate_transaction(
+        [
+            (
+                "INSERT INTO pagos (pedido_id, metodo, monto, estado, fecha) "
+                "VALUES (?,?,?,?,?)",
+                (pedido["id"], "YAPPY COMERCIAL", cobro["monto"], "CONFIRMADO", fecha),
+            ),
+            ("UPDATE pedidos SET estado=? WHERE id=?", (nuevo_estado, pedido["id"])),
+            (
+                "UPDATE cobros_yappy SET estado='PAGADO', referencia=?, fecha_pago=? "
+                "WHERE id=?",
+                (referencia, fecha, cobro["id"]),
+            ),
+        ]
+    )
+    if not ok:
+        if "UNIQUE" in (error or ""):
+            raise ValueError("Este pedido ya tiene un pago registrado.")
+        raise RuntimeError(error)
+    if error:
+        flash(error, "warning")
+
+    pago_dict = {
+        "id": operation_ids[0], "pedido_id": pedido["id"],
+        "metodo": f"YAPPY COMERCIAL ({referencia}, cobro {cobro['codigo']})",
+        "monto": cobro["monto"], "estado": "CONFIRMADO", "fecha": fecha,
+    }
+    pedido_dict = {
+        "cliente": pedido["cliente"], "retiro_o_flete": pedido["retiro_o_flete"],
+        "direccion": pedido["direccion"],
+    }
+    json_data, ruta_json = generar_json_pago(pago_dict, pedido_dict)
+    _notify_json_recipients(
+        (pedido["correo_cliente"], EMPRESA_CORREO),
+        f"Confirmación de pago - Pedido #{pedido['id']}",
+        json_data, ruta_json,
+    )
+
+
 @app.route("/pagos", methods=["GET", "POST"])
 def pagos():
+    if request.method == "POST":
+        try:
+            pedido_id = int(request.form.get("pedido_id"))
+
+            conn = database.get_local_conn()
+            try:
+                pedido = _obtener_pedido(conn, pedido_id)
+                if pedido is None:
+                    raise ValueError("El pedido indicado no existe.")
+                if pedido["estado"] in ESTADOS_PAGADOS or conn.execute(
+                    "SELECT 1 FROM pagos WHERE pedido_id=?", (pedido_id,)
+                ).fetchone():
+                    raise ValueError("Este pedido ya fue pagado.")
+                cobro = conn.execute(
+                    "SELECT codigo FROM cobros_yappy "
+                    "WHERE pedido_id=? AND estado='PENDIENTE'",
+                    (pedido_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+
+            # Si el pedido ya tenía un cobro pendiente, se reutiliza el mismo código.
+            if cobro:
+                return redirect(url_for("cobro_yappy", codigo=cobro["codigo"]))
+
+            codigo = generar_codigo_cobro()
+            ok, _, error = database.replicate_write(
+                "INSERT INTO cobros_yappy (pedido_id, codigo, monto, estado, fecha) "
+                "VALUES (?,?,?,?,?)",
+                (pedido_id, codigo, pedido["total"], "PENDIENTE",
+                 datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            )
+            if not ok:
+                raise RuntimeError(error)
+            if error:
+                flash(error, "warning")
+            return redirect(url_for("cobro_yappy", codigo=codigo))
+
+        except (ValueError, RuntimeError, TypeError, sqlite3.Error) as e:
+            flash(f"Error al generar el cobro: {e}", "danger")
+
     try:
         conn = database.get_local_conn()
         pedidos_pendientes = conn.execute(
@@ -338,83 +496,101 @@ def pagos():
             "ORDER BY pedidos.id DESC"
         ).fetchall()
         historial_pagos = conn.execute(
-            "SELECT pagos.*, pedidos.cliente, pedidos.retiro_o_flete FROM pagos "
-            "JOIN pedidos ON pagos.pedido_id = pedidos.id ORDER BY pagos.id DESC"
+            "SELECT pagos.*, pedidos.cliente, pedidos.retiro_o_flete, pedidos.direccion, "
+            "cobros_yappy.codigo, cobros_yappy.referencia FROM pagos "
+            "JOIN pedidos ON pagos.pedido_id = pedidos.id "
+            "LEFT JOIN cobros_yappy ON cobros_yappy.pedido_id = pagos.pedido_id "
+            "AND cobros_yappy.estado = 'PAGADO' "
+            "ORDER BY pagos.id DESC"
         ).fetchall()
         conn.close()
     except sqlite3.Error as e:
         flash(f"Error al cargar datos: {e}", "danger")
         pedidos_pendientes, historial_pagos = [], []
 
+    return render_template(
+        "pagos.html", pedidos=pedidos_pendientes, pagos=historial_pagos
+    )
+
+
+@app.route("/pagos/yappy/<codigo>", methods=["GET", "POST"])
+def cobro_yappy(codigo):
+    """Pantalla de caja: QR, número Yappy y confirmación del pago."""
+    try:
+        cobro, pedido = _obtener_cobro(codigo)
+    except sqlite3.Error as e:
+        flash(f"Error al cargar el cobro: {e}", "danger")
+        return redirect(url_for("pagos"))
+    if cobro is None:
+        flash("El cobro Yappy indicado no existe.", "warning")
+        return redirect(url_for("pagos"))
+
     if request.method == "POST":
+        # Pago enviado al número: el cajero verifica el código en el mensaje
+        # recibido en Yappy y anota el número de transacción.
         try:
-            pedido_id = int(request.form.get("pedido_id"))
+            referencia = request.form.get("referencia", "").strip().upper()
+            if not re.fullmatch(r"[A-Z0-9-]{4,30}", referencia):
+                raise ValueError(
+                    "Indique el número de transacción Yappy (4 a 30 letras, números o guiones)."
+                )
+            _confirmar_cobro(cobro, pedido, referencia)
+            flash(f"Pago del pedido #{pedido['id']} confirmado (ref. {referencia}).", "success")
+            return redirect(url_for("cobro_yappy", codigo=codigo))
+        except (ValueError, RuntimeError, sqlite3.Error) as e:
+            flash(f"Error al confirmar el pago: {e}", "danger")
 
-            conn = database.get_local_conn()
-            pedido = conn.execute(
-                "SELECT pedidos.*, pizzas.nombre AS pizza_nombre FROM pedidos "
-                "JOIN pizzas ON pedidos.pizza_id = pizzas.id WHERE pedidos.id=?",
-                (pedido_id,)
-            ).fetchone()
-            conn.close()
-            if pedido is None:
-                raise ValueError("El pedido indicado no existe.")
-            if pedido["estado"] in ("PAGADO", "PAGADO - DESPACHAR (FLETE)"):
-                raise ValueError("Este pedido ya fue pagado.")
-            conn = database.get_local_conn()
-            pago_existente = conn.execute(
-                "SELECT 1 FROM pagos WHERE pedido_id=?", (pedido_id,)
-            ).fetchone()
-            conn.close()
-            if pago_existente:
-                raise ValueError("Este pedido ya tiene un pago registrado.")
+    url_pago = _url_publica("yappy_pagar", codigo=codigo)
+    return render_template(
+        "cobro_yappy.html", cobro=cobro, pedido=pedido,
+        qr=qr_svg(url_pago), url_pago=url_pago,
+        yappy_telefono=YAPPY_TELEFONO, yappy_directorio=YAPPY_DIRECTORIO,
+    )
 
-            ok_pago, referencia, error_pago = simular_pago_yappy(pedido["total"])
+
+@app.route("/pagos/yappy/<codigo>/estado")
+def cobro_yappy_estado(codigo):
+    """Consulta ligera que usa la pantalla de caja para detectar el pago."""
+    try:
+        cobro, _ = _obtener_cobro(codigo)
+    except sqlite3.Error as e:
+        return jsonify(error=str(e)), 500
+    if cobro is None:
+        return jsonify(error="Cobro no encontrado"), 404
+    return jsonify(
+        estado=cobro["estado"], referencia=cobro["referencia"],
+        fecha_pago=cobro["fecha_pago"],
+    )
+
+
+@app.route("/yappy/pagar/<codigo>", methods=["GET", "POST"])
+def yappy_pagar(codigo):
+    """
+    Página que abre el celular al escanear el QR. Simula la app de Yappy:
+    muestra el comercio y el monto, y al pulsar «Pagar» confirma el cobro.
+    En producción este paso lo haría la app real de Yappy (botón de pago / webhook).
+    """
+    try:
+        cobro, pedido = _obtener_cobro(codigo)
+    except sqlite3.Error as e:
+        flash(f"Error al cargar el cobro: {e}", "danger")
+        cobro = pedido = None
+    if cobro is None:
+        return render_template("yappy_pagar.html", cobro=None), 404
+
+    if request.method == "POST" and cobro["estado"] == "PENDIENTE":
+        try:
+            ok_pago, referencia, error_pago = simular_pago_yappy(cobro["monto"])
             if not ok_pago:
                 raise RuntimeError(f"No se pudo procesar el pago con Yappy: {error_pago}")
-
-            fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-            nuevo_estado = "PAGADO" if pedido["retiro_o_flete"] == "RETIRO EN SITIO" else "PAGADO - DESPACHAR (FLETE)"
-            ok, operation_ids, error = database.replicate_transaction(
-                [
-                    (
-                        "INSERT INTO pagos (pedido_id, metodo, monto, estado, fecha) "
-                        "VALUES (?,?,?,?,?)",
-                        (pedido_id, "YAPPY COMERCIAL", pedido["total"], "CONFIRMADO", fecha),
-                    ),
-                    ("UPDATE pedidos SET estado=? WHERE id=?", (nuevo_estado, pedido_id)),
-                ]
-            )
-            if not ok:
-                raise RuntimeError(error)
-            pago_id = operation_ids[0]
-            if error:
-                flash(error, "warning")
-
-            pago_dict = {
-                "id": pago_id, "pedido_id": pedido_id, "metodo": "YAPPY COMERCIAL (" + referencia + ")",
-                "monto": pedido["total"], "estado": "CONFIRMADO", "fecha": fecha,
-            }
-            pedido_dict = {
-                "cliente": pedido["cliente"], "retiro_o_flete": pedido["retiro_o_flete"]
-            }
-            json_data, ruta_json = generar_json_pago(pago_dict, pedido_dict)
-
-            _notify_json_recipients(
-                (pedido["correo_cliente"], EMPRESA_CORREO),
-                f"Confirmación de pago - Pedido #{pedido_id}",
-                json_data, ruta_json
-            )
-
-            flash(f"Pago del pedido #{pedido_id} confirmado (ref. {referencia}).", "success")
-            return redirect(url_for("pagos"))
-
-        except (ValueError, RuntimeError, TypeError) as e:
+            _confirmar_cobro(cobro, pedido, referencia)
+            return redirect(url_for("yappy_pagar", codigo=codigo))
+        except (ValueError, RuntimeError, sqlite3.Error) as e:
             flash(f"Error al procesar el pago: {e}", "danger")
 
     return render_template(
-        "pagos.html", pedidos=pedidos_pendientes, pagos=historial_pagos
+        "yappy_pagar.html", cobro=cobro, pedido=pedido,
+        yappy_directorio=YAPPY_DIRECTORIO,
     )
 
 

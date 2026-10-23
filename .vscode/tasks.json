@@ -4,7 +4,10 @@
 		{
 			"label": "Iniciar app Flask",
 			"type": "shell",
-			"command": "${workspaceFolder}/.venv/bin/python",
+			"command": "${workspaceFolder}/venv/bin/python",
+			"windows": {
+				"command": "${workspaceFolder}\\venv\\Scripts\\python.exe"
+			},
 			"args": [
 				"-c",
 				"import database; database.init_db(); from app import app; app.config[\"TEMPLATES_AUTO_RELOAD\"] = True; app.run(host=\"127.0.0.1\", port=5005, debug=False)"

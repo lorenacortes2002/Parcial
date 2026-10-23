@@ -13,7 +13,9 @@ import utils
 
 class ProjectRequirementsTests(unittest.TestCase):
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
+        # ignore_cleanup_errors evita fallos en Windows si SQLite mantiene el
+        # archivo bloqueado unos milisegundos tras cerrar la conexión.
+        self.temp_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         root = Path(self.temp_dir.name)
         self.local_path = root / "local.sqlite3"
         self.replica_path = root / "replica.sqlite3"
@@ -42,8 +44,13 @@ class ProjectRequirementsTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def _rows(self, path, query, params=()):
-        with sqlite3.connect(path) as conn:
+        # Cerramos explícitamente la conexión: en sqlite3 el bloque "with"
+        # solo confirma la transacción, no cierra el archivo (clave en Windows).
+        conn = sqlite3.connect(path)
+        try:
             return conn.execute(query, params).fetchall()
+        finally:
+            conn.close()
 
     def test_startup_has_five_catalog_items_in_both_databases(self):
         for path in (self.local_path, self.replica_path):
@@ -137,6 +144,7 @@ class ProjectRequirementsTests(unittest.TestCase):
                 "refresco": "Coca-Cola",
                 "cantidad": "2",
                 "retiro_o_flete": "FLETE A DOMICILIO",
+                "direccion": "David, Barrio Bolívar, calle 3, casa 24",
             },
             follow_redirects=True,
         )
@@ -145,25 +153,63 @@ class ProjectRequirementsTests(unittest.TestCase):
 
         order = self._rows(
             self.local_path,
-            "SELECT id, total, estado, retiro_o_flete FROM pedidos",
+            "SELECT id, total, estado, retiro_o_flete, direccion FROM pedidos",
         )[0]
-        self.assertEqual(order[1:], (15.0, "CONFIRMADO", "FLETE A DOMICILIO"))
+        self.assertEqual(
+            order[1:],
+            (15.0, "CONFIRMADO", "FLETE A DOMICILIO",
+             "David, Barrio Bolívar, calle 3, casa 24"),
+        )
         self.assertEqual(
             self._rows(
                 self.replica_path,
-                "SELECT id, total, estado, retiro_o_flete FROM pedidos",
+                "SELECT id, total, estado, retiro_o_flete, direccion FROM pedidos",
             )[0],
             order,
         )
         json_files = list(self.pedidos_dir.glob("*.json"))
         self.assertEqual(len(json_files), 1)
-        self.assertEqual(json.loads(json_files[0].read_text())["id"], order[0])
+        order_json = json.loads(json_files[0].read_text(encoding="utf-8"))
+        self.assertEqual(order_json["id"], order[0])
+        self.assertEqual(order_json["direccion"], order[4])
 
-        payment = self.client.post(
-            "/pagos", data={"pedido_id": str(order[0])}, follow_redirects=True
+        # 1) Generar el cobro: muestra QR, número Yappy y el código del cobro.
+        charge = self.client.post("/pagos", data={"pedido_id": str(order[0])})
+        self.assertEqual(charge.status_code, 302)
+        codigo = self._rows(
+            self.local_path, "SELECT codigo FROM cobros_yappy WHERE pedido_id=?",
+            (order[0],),
+        )[0][0]
+        self.assertEqual(
+            self._rows(self.replica_path, "SELECT codigo, estado FROM cobros_yappy"),
+            [(codigo, "PENDIENTE")],
         )
-        self.assertIn(b"Pago del pedido", payment.data)
+        charge_page = self.client.get(charge.headers["Location"])
+        self.assertIn(b"<svg", charge_page.data)
+        self.assertIn(utils.YAPPY_TELEFONO.encode(), charge_page.data)
+        self.assertIn(codigo.encode(), charge_page.data)
+        self.assertEqual(
+            self.client.get(f"/pagos/yappy/{codigo}/estado").get_json()["estado"],
+            "PENDIENTE",
+        )
+
+        # Generar de nuevo reutiliza el mismo cobro pendiente.
+        self.client.post("/pagos", data={"pedido_id": str(order[0])})
+        self.assertEqual(
+            self._rows(self.local_path, "SELECT COUNT(*) FROM cobros_yappy")[0][0], 1
+        )
+
+        # 2) El cliente escanea el QR y paga; recibe la confirmación.
+        payment = self.client.post(f"/yappy/pagar/{codigo}", follow_redirects=True)
+        self.assertIn("¡Pago realizado!".encode(), payment.data)
         self.assertEqual(self.mail_mock.call_count, 4)
+        status = self.client.get(f"/pagos/yappy/{codigo}/estado").get_json()
+        self.assertEqual(status["estado"], "PAGADO")
+        self.assertTrue(status["referencia"].startswith("YAPPY-"))
+        self.assertIn(
+            "¡Pago confirmado!".encode(),
+            self.client.get(f"/pagos/yappy/{codigo}").data,
+        )
 
         for path in (self.local_path, self.replica_path):
             self.assertEqual(
@@ -181,10 +227,95 @@ class ProjectRequirementsTests(unittest.TestCase):
             "/pagos", data={"pedido_id": str(order[0])}, follow_redirects=True
         )
         self.assertIn(b"Este pedido ya fue pagado", repeated.data)
+        repeated_manual = self.client.post(
+            f"/pagos/yappy/{codigo}", data={"referencia": "ABC12345"},
+            follow_redirects=True,
+        )
+        self.assertIn(b"Este pedido ya fue pagado", repeated_manual.data)
+        self.client.post(f"/yappy/pagar/{codigo}")
         self.assertEqual(self.mail_mock.call_count, 4)
         self.assertEqual(
             self._rows(self.local_path, "SELECT COUNT(*) FROM pagos")[0][0], 1
         )
+
+    def test_home_delivery_requires_an_address(self):
+        response = self.client.post(
+            "/pedidos",
+            data={
+                "cliente": "Cliente",
+                "correo_cliente": "cliente@example.com",
+                "pizza_id": "1",
+                "refresco": "Coca-Cola",
+                "cantidad": "1",
+                "retiro_o_flete": "FLETE A DOMICILIO",
+                "direccion": "  ",
+            },
+        )
+        self.assertIn("indique la dirección completa".encode(), response.data)
+        self.assertEqual(
+            self._rows(self.local_path, "SELECT COUNT(*) FROM pedidos")[0][0], 0
+        )
+
+        # En retiro en sitio la dirección se ignora.
+        self.client.post(
+            "/pedidos",
+            data={
+                "cliente": "Cliente",
+                "correo_cliente": "cliente@example.com",
+                "pizza_id": "1",
+                "refresco": "Coca-Cola",
+                "cantidad": "1",
+                "retiro_o_flete": "RETIRO EN SITIO",
+                "direccion": "No debería guardarse",
+            },
+        )
+        self.assertEqual(
+            self._rows(self.local_path, "SELECT direccion FROM pedidos"), [(None,)]
+        )
+
+    def test_payment_sent_to_yappy_number_is_confirmed_with_reference(self):
+        self.client.post(
+            "/pedidos",
+            data={
+                "cliente": "Cliente",
+                "correo_cliente": "cliente@example.com",
+                "pizza_id": "2",
+                "refresco": "Sprite",
+                "cantidad": "1",
+                "retiro_o_flete": "RETIRO EN SITIO",
+            },
+        )
+        pedido_id = self._rows(self.local_path, "SELECT id FROM pedidos")[0][0]
+        charge = self.client.post("/pagos", data={"pedido_id": str(pedido_id)})
+        codigo = charge.headers["Location"].rsplit("/", 1)[-1]
+
+        invalid = self.client.post(f"/pagos/yappy/{codigo}", data={"referencia": "x"})
+        self.assertIn("número de transacción".encode(), invalid.data)
+        self.assertEqual(
+            self._rows(self.local_path, "SELECT COUNT(*) FROM pagos")[0][0], 0
+        )
+
+        confirmed = self.client.post(
+            f"/pagos/yappy/{codigo}", data={"referencia": "7h3k9p2m"},
+            follow_redirects=True,
+        )
+        self.assertIn("¡Pago confirmado!".encode(), confirmed.data)
+        for path in (self.local_path, self.replica_path):
+            self.assertEqual(
+                self._rows(path, "SELECT estado, referencia FROM cobros_yappy"),
+                [("PAGADO", "7H3K9P2M")],
+            )
+            self.assertEqual(
+                self._rows(path, "SELECT estado FROM pedidos WHERE id=?", (pedido_id,)),
+                [("PAGADO",)],
+            )
+
+    def test_unknown_yappy_code_is_handled(self):
+        self.assertEqual(self.client.get("/yappy/pagar/CC-NOPE00").status_code, 404)
+        self.assertEqual(
+            self.client.get("/pagos/yappy/CC-NOPE00/estado").status_code, 404
+        )
+        self.assertEqual(self.client.get("/pagos/yappy/CC-NOPE00").status_code, 302)
 
     def test_email_failure_is_reported_without_false_success(self):
         self.mail.stop()

@@ -47,8 +47,18 @@
       <label for="entrega">Entrega</label>
       <select id="entrega" name="retiro_o_flete">
         <option value="RETIRO EN SITIO">Retiro en sitio</option>
-        <option value="FLETE A DOMICILIO">Flete a domicilio</option>
+        <option value="FLETE A DOMICILIO"
+          {% if form.get('retiro_o_flete') == 'FLETE A DOMICILIO' %}selected{% endif %}>Flete a domicilio</option>
       </select>
+    </div>
+    <div class="form-field form-field--full" id="direccion-field"
+      {% if form.get('retiro_o_flete') != 'FLETE A DOMICILIO' %}hidden{% endif %}>
+      <label for="direccion">Dirección de entrega</label>
+      <textarea id="direccion" name="direccion" rows="3" autocomplete="street-address"
+        minlength="{{ min_direccion }}" maxlength="{{ max_direccion }}"
+        placeholder="Ej.: David, Barrio Bolívar, calle 3.ª, casa 24 — frente al parque"
+        aria-describedby="direccion-help">{{ form.get('direccion', '') }}</textarea>
+      <small id="direccion-help">Incluye barrio, calle, número de casa o apartamento y un punto de referencia.</small>
     </div>
   </div>
 
@@ -77,11 +87,15 @@
     <span>Entrega</span>
     <strong id="summary-delivery">Retiro en sitio</strong>
   </div>
+  <div class="summary-item" id="summary-address-row" hidden>
+    <span>Dirección</span>
+    <strong id="summary-address">Pendiente</strong>
+  </div>
   <div class="summary-total">
     <span>Total estimado</span>
     <strong id="summary-total" aria-live="polite">$0.00</strong>
   </div>
-  <p class="summary-footnote">El total se calcula con el precio del combo seleccionado. El flete no tiene costo definido en este prototipo.</p>
+  <p class="summary-footnote">El total se calcula con el precio del combo seleccionado. El flete no tiene costo definido en este prototipo; si eliges domicilio, anota la dirección de entrega.</p>
 </aside>
 </div>
 
@@ -99,7 +113,10 @@
       <td>{{ pe.pizza_nombre }}</td>
       <td>{{ pe.cantidad }}</td>
       <td>${{ "%.2f"|format(pe.total) }}</td>
-      <td>{{ pe.retiro_o_flete }}</td>
+      <td>
+        {{ pe.retiro_o_flete }}
+        {% if pe.direccion %}<small class="table-detail">{{ pe.direccion }}</small>{% endif %}
+      </td>
       <td><span class="estado">{{ pe.estado }}</span></td>
       <td>{{ pe.fecha }}</td>
     </tr>

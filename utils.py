@@ -7,15 +7,19 @@ Funciones auxiliares:
   - enviar_correo: intenta enviar el JSON por SMTP; si no hay servidor
     de correo configurado (entorno de prueba/local), captura el error
     con try/except y deja constancia en un log, sin tumbar la app.
+  - generar_codigo_cobro / qr_svg: crean el código del cobro Yappy y su QR.
   - simular_pago_yappy: simula la captura de pago con Yappy Comercial.
 -------------------------------------------------
 """
 
 import json
 import os
+import secrets
 import smtplib
 from email.message import EmailMessage
 from datetime import datetime
+
+import segno
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PEDIDOS_JSON_DIR = os.path.join(BASE_DIR, "pedidos_json")
@@ -28,6 +32,10 @@ SMTP_PORT = int(os.environ.get("SMTP_PORT", 25))
 SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASS = os.environ.get("SMTP_PASS", "")
 EMPRESA_CORREO = os.environ.get("EMPRESA_CORREO", "pedidos@chinoscafe.local")
+
+# --- Datos del comercio en Yappy (editar con los reales) --------------------
+YAPPY_TELEFONO = os.environ.get("YAPPY_TELEFONO", "6123-4567")
+YAPPY_DIRECTORIO = os.environ.get("YAPPY_DIRECTORIO", "@ChinosCafe")
 
 
 def _guardar_json(data, carpeta, prefijo):
@@ -54,6 +62,7 @@ def generar_json_pedido(pedido):
         "cantidad": pedido["cantidad"],
         "total": pedido["total"],
         "retiro_o_flete": pedido["retiro_o_flete"],
+        "direccion": pedido.get("direccion"),
         "estado": pedido["estado"],
         "fecha": pedido["fecha"],
     }
@@ -70,6 +79,7 @@ def generar_json_pago(pago, pedido):
         "monto": pago["monto"],
         "estado": pago["estado"],
         "retiro_o_flete": pedido["retiro_o_flete"],
+        "direccion": pedido.get("direccion"),
         "fecha": pago["fecha"],
     }
     return data, _guardar_json(data, PAGOS_JSON_DIR, "pago")
@@ -132,3 +142,16 @@ def simular_pago_yappy(monto):
         return True, referencia, None
     except (ValueError, TypeError) as e:
         return False, None, str(e)
+
+
+def generar_codigo_cobro():
+    """Código corto que el cliente escribe en el mensaje del pago Yappy."""
+    alfabeto = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"   # sin 0/O ni 1/I para evitar confusiones
+    return "CC-" + "".join(secrets.choice(alfabeto) for _ in range(6))
+
+
+def qr_svg(contenido):
+    """Devuelve el código QR de `contenido` como SVG listo para incrustar en HTML."""
+    return segno.make(contenido, error="m").svg_inline(
+        scale=6, border=2, dark="#193a2b", light="#ffffff"
+    )
