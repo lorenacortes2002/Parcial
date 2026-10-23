@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS pizzas (
     nombre TEXT NOT NULL,
     ingredientes TEXT NOT NULL,      -- separados por coma, min 2 - max 10
     refresco TEXT,
-    precio REAL NOT NULL DEFAULT 5.00
+    precio REAL NOT NULL DEFAULT 5.00,
+    entrega TEXT NOT NULL DEFAULT 'AMBOS'   -- AMBOS / RETIRO EN SITIO / FLETE A DOMICILIO
 );
 
 CREATE TABLE IF NOT EXISTS pedidos (
@@ -77,6 +78,9 @@ def _migrate(conn):
     columnas = {row["name"] for row in conn.execute("PRAGMA table_info(pedidos)")}
     if "direccion" not in columnas:
         conn.execute("ALTER TABLE pedidos ADD COLUMN direccion TEXT")
+    columnas = {row["name"] for row in conn.execute("PRAGMA table_info(pizzas)")}
+    if "entrega" not in columnas:
+        conn.execute("ALTER TABLE pizzas ADD COLUMN entrega TEXT NOT NULL DEFAULT 'AMBOS'")
     try:
         # Un pedido solo puede tener un pago: evita cobros dobles simultáneos.
         conn.execute(
@@ -164,17 +168,18 @@ def init_db():
                 for pizza in pizzas:
                     replica_conn.execute(
                         """
-                        INSERT INTO pizzas (id, nombre, ingredientes, refresco, precio)
-                        VALUES (?, ?, ?, ?, ?)
+                        INSERT INTO pizzas (id, nombre, ingredientes, refresco, precio, entrega)
+                        VALUES (?, ?, ?, ?, ?, ?)
                         ON CONFLICT(id) DO UPDATE SET
                             nombre=excluded.nombre,
                             ingredientes=excluded.ingredientes,
                             refresco=excluded.refresco,
-                            precio=excluded.precio
+                            precio=excluded.precio,
+                            entrega=excluded.entrega
                         """,
                         (
                             pizza["id"], pizza["nombre"], pizza["ingredientes"],
-                            pizza["refresco"], pizza["precio"],
+                            pizza["refresco"], pizza["precio"], pizza["entrega"],
                         ),
                     )
         finally:

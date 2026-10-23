@@ -23,7 +23,7 @@
       <label for="pizza-id">Pizza (combo)</label>
       <select id="pizza-id" name="pizza_id" required aria-describedby="pizza-help">
         {% for p in pizzas %}
-          <option value="{{ p.id }}" data-price="{{ p.precio }}"
+          <option value="{{ p.id }}" data-price="{{ p.precio }}" data-entrega="{{ p.entrega }}"
             {% if p.id == selected_pizza_id %}selected{% endif %}>
             {{ p.nombre }} — ${{ "%.2f"|format(p.precio) }}
           </option>
@@ -45,11 +45,12 @@
     </div>
     <div class="form-field">
       <label for="entrega">Entrega</label>
-      <select id="entrega" name="retiro_o_flete">
+      <select id="entrega" name="retiro_o_flete" aria-describedby="entrega-help">
         <option value="RETIRO EN SITIO">Retiro en sitio</option>
         <option value="FLETE A DOMICILIO"
           {% if form.get('retiro_o_flete') == 'FLETE A DOMICILIO' %}selected{% endif %}>Flete a domicilio</option>
       </select>
+      <small id="entrega-help" hidden></small>
     </div>
     <div class="form-field form-field--full" id="direccion-field"
       {% if form.get('retiro_o_flete') != 'FLETE A DOMICILIO' %}hidden{% endif %}>

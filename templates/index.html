@@ -39,6 +39,7 @@
       <h3>{{ p.nombre }}</h3>
       <p class="muted">{{ p.ingredientes.replace(',', ', ') }}</p>
       <p class="drink">🥤 {{ p.refresco }}</p>
+      <p class="delivery-note">{{ entregas_pizza[p.entrega] }}</p>
       <div class="card-bottom">
         <span class="precio">${{ "%.2f"|format(p.precio) }}</span>
         <a class="btn" href="{{ url_for('pedidos', pizza_id=p.id) }}">Pedir</a>

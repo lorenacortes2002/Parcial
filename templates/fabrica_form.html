@@ -35,6 +35,14 @@
     {% endfor %}
   </select>
 
+  <label for="entrega">Forma de entrega</label>
+  <select id="entrega" name="entrega" aria-describedby="entrega-help">
+    {% for valor, texto in entregas_pizza.items() %}
+      <option value="{{ valor }}" {% if entrega_actual == valor %}selected{% endif %}>{{ texto }}</option>
+    {% endfor %}
+  </select>
+  <small id="entrega-help">Define si este combo se puede pedir a domicilio, para retirar o de ambas formas.</small>
+
   <label for="precio">Precio (USD)</label>
   <input id="precio" type="number" step="0.01" min="0.01" name="precio" required
          value="{{ pizza.precio if pizza else '' }}">

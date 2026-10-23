@@ -272,6 +272,10 @@ main.container { animation: content-enter .55s cubic-bezier(.2, .7, .25, 1) both
 .card h3 { margin: 0 0 7px; font-size: 1.3rem; }
 .card .muted { min-height: 48px; margin: 0; }
 .drink { margin: 14px 0 18px; color: var(--muted); font-size: .9rem; }
+.drink:has(+ .delivery-note) { margin-bottom: 4px; }
+.delivery-note { margin: 0 0 18px; color: var(--green); font-size: .82rem; font-weight: 600; }
+.delivery-note::before { content: "🛵 "; }
+.entrega-badge { color: #2f5a44; background: #e6efe7; }
 .card-bottom { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .precio { color: var(--green); font-size: 1.25rem; font-weight: 700; }
 .muted { color: var(--muted); font-size: .92rem; }

@@ -17,6 +17,26 @@ if (pizzaSelect && quantityInput && deliverySelect) {
     currency: "USD",
   });
 
+  const deliveryHelp = document.querySelector("#entrega-help");
+
+  // Cada pizza define en Fábrica si admite domicilio, retiro o ambos:
+  // se desactiva la opción no permitida y se cambia a la que sí lo está.
+  const applyPizzaDelivery = () => {
+    const allowed = pizzaSelect.selectedOptions[0]?.dataset.entrega ?? "AMBOS";
+    [...deliverySelect.options].forEach((option) => {
+      option.disabled = allowed !== "AMBOS" && option.value !== allowed;
+    });
+    if (deliverySelect.selectedOptions[0]?.disabled) deliverySelect.value = allowed;
+
+    if (deliveryHelp) {
+      deliveryHelp.hidden = allowed === "AMBOS";
+      deliveryHelp.textContent =
+        allowed === "FLETE A DOMICILIO"
+          ? "Este combo solo se entrega a domicilio."
+          : "Este combo solo está disponible para retiro en sitio.";
+    }
+  };
+
   const updateSummary = () => {
     const selected = pizzaSelect.selectedOptions[0];
     const unitPrice = Number(selected?.dataset.price ?? 0);
@@ -40,12 +60,16 @@ if (pizzaSelect && quantityInput && deliverySelect) {
     summaryTotal.textContent = currency.format(unitPrice * quantity);
   };
 
-  pizzaSelect.addEventListener("change", updateSummary);
+  pizzaSelect.addEventListener("change", () => {
+    applyPizzaDelivery();
+    updateSummary();
+  });
   quantityInput.addEventListener("input", updateSummary);
   deliverySelect.addEventListener("change", () => {
     updateSummary();
     if (deliverySelect.value === "FLETE A DOMICILIO") addressInput?.focus();
   });
   addressInput?.addEventListener("input", updateSummary);
+  applyPizzaDelivery();
   updateSummary();
 }

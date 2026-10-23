@@ -310,6 +310,62 @@ class ProjectRequirementsTests(unittest.TestCase):
                 [("PAGADO",)],
             )
 
+    def test_pizza_delivery_option_is_saved_and_enforced_on_orders(self):
+        base = {
+            "ingredientes": ["pepperoni", "jamón"],
+            "refresco": "Sprite",
+            "precio": "9.00",
+        }
+        invalid = self.client.post(
+            "/fabrica/nueva", data={**base, "nombre": "Mala", "entrega": "DRON"}
+        )
+        self.assertIn("forma de entrega válida".encode(), invalid.data)
+
+        self.client.post(
+            "/fabrica/nueva",
+            data={**base, "nombre": "Solo Retiro", "entrega": "RETIRO EN SITIO"},
+        )
+        pizza_id = self._rows(
+            self.local_path, "SELECT id FROM pizzas WHERE nombre='Solo Retiro'"
+        )[0][0]
+        for path in (self.local_path, self.replica_path):
+            self.assertEqual(
+                self._rows(path, "SELECT entrega FROM pizzas WHERE id=?", (pizza_id,)),
+                [("RETIRO EN SITIO",)],
+            )
+        self.assertIn(b"Solo retiro en sitio", self.client.get("/fabrica").data)
+
+        pedido = {
+            "cliente": "Cliente",
+            "correo_cliente": "cliente@example.com",
+            "pizza_id": str(pizza_id),
+            "refresco": "Sprite",
+            "cantidad": "1",
+        }
+        rejected = self.client.post(
+            "/pedidos",
+            data={**pedido, "retiro_o_flete": "FLETE A DOMICILIO",
+                  "direccion": "David, Barrio Bolívar, casa 24"},
+        )
+        self.assertIn("solo está disponible para retiro en sitio".encode(), rejected.data)
+        self.assertEqual(
+            self._rows(self.local_path, "SELECT COUNT(*) FROM pedidos")[0][0], 0
+        )
+
+        self.client.post("/pedidos", data={**pedido, "retiro_o_flete": "RETIRO EN SITIO"})
+        self.assertEqual(
+            self._rows(self.local_path, "SELECT COUNT(*) FROM pedidos")[0][0], 1
+        )
+
+        self.client.post(
+            f"/fabrica/editar/{pizza_id}",
+            data={**base, "nombre": "Solo Retiro", "entrega": "AMBOS"},
+        )
+        self.assertEqual(
+            self._rows(self.replica_path, "SELECT entrega FROM pizzas WHERE id=?", (pizza_id,)),
+            [("AMBOS",)],
+        )
+
     def test_unknown_yappy_code_is_handled(self):
         self.assertEqual(self.client.get("/yappy/pagar/CC-NOPE00").status_code, 404)
         self.assertEqual(
@@ -357,7 +413,7 @@ class ProjectRequirementsTests(unittest.TestCase):
         html = order_page.get_data(as_text=True)
         self.assertRegex(
             html,
-            re.compile(r'<option value="3" data-price="7\.25"\s+selected>'),
+            re.compile(r'<option value="3" data-price="7\.25" data-entrega="AMBOS"\s+selected>'),
         )
         self.assertIn(b'id="summary-total"', order_page.data)
         self.assertIn(b'static/order.js', order_page.data)

@@ -49,12 +49,20 @@ REFRESCOS_DISPONIBLES = [
     "Coca-Cola", "Coca-Cola Zero", "Sprite", "Fanta", "Agua", "Ninguno"
 ]
 
+# Formas de entrega que admite cada pizza (valor guardado -> texto visible).
+ENTREGAS_PIZZA = {
+    "AMBOS": "Domicilio y retiro en sitio",
+    "RETIRO EN SITIO": "Solo retiro en sitio",
+    "FLETE A DOMICILIO": "Solo a domicilio",
+}
+
 
 def _pizza_fields_from_form():
     nombre = request.form.get("nombre", "").strip()
     ingredientes = request.form.getlist("ingredientes")
     refresco = request.form.get("refresco", "")
     precio = float(request.form.get("precio", "0"))
+    entrega = request.form.get("entrega", "AMBOS")
 
     if not nombre:
         raise ValueError("El nombre de la pizza es obligatorio.")
@@ -70,8 +78,10 @@ def _pizza_fields_from_form():
         raise ValueError("Seleccione un refresco válido.")
     if not math.isfinite(precio) or precio <= 0:
         raise ValueError("El precio debe ser un número mayor a cero.")
+    if entrega not in ENTREGAS_PIZZA:
+        raise ValueError("Seleccione una forma de entrega válida.")
 
-    return nombre, ingredientes, refresco, precio
+    return nombre, ingredientes, refresco, precio, entrega
 
 
 def _notify_json_recipients(recipients, subject, json_data, ruta_json):
@@ -109,7 +119,7 @@ def index():
     except sqlite3.Error as e:
         flash(f"Error al cargar el menú: {e}", "danger")
         pizzas = []
-    return render_template("index.html", pizzas=pizzas)
+    return render_template("index.html", pizzas=pizzas, entregas_pizza=ENTREGAS_PIZZA)
 
 
 # ----------------------------------------------------------------------
@@ -124,18 +134,19 @@ def fabrica():
     except sqlite3.Error as e:
         flash(f"Error al consultar pizzas: {e}", "danger")
         pizzas = []
-    return render_template("fabrica.html", pizzas=pizzas)
+    return render_template("fabrica.html", pizzas=pizzas, entregas_pizza=ENTREGAS_PIZZA)
 
 
 @app.route("/fabrica/nueva", methods=["GET", "POST"])
 def fabrica_nueva():
     if request.method == "POST":
         try:
-            nombre, ingredientes, refresco, precio = _pizza_fields_from_form()
+            nombre, ingredientes, refresco, precio, entrega = _pizza_fields_from_form()
 
             ok, last_id, error = database.replicate_write(
-                "INSERT INTO pizzas (nombre, ingredientes, refresco, precio) VALUES (?,?,?,?)",
-                (nombre, ",".join(ingredientes), refresco, precio),
+                "INSERT INTO pizzas (nombre, ingredientes, refresco, precio, entrega) "
+                "VALUES (?,?,?,?,?)",
+                (nombre, ",".join(ingredientes), refresco, precio, entrega),
             )
             if not ok:
                 raise RuntimeError(error)
@@ -152,6 +163,7 @@ def fabrica_nueva():
         "fabrica_form.html", pizza=None,
         ingredientes_disponibles=INGREDIENTES_DISPONIBLES,
         refrescos_disponibles=REFRESCOS_DISPONIBLES,
+        entregas_pizza=ENTREGAS_PIZZA, entrega_actual=request.form.get("entrega", "AMBOS"),
         ingredientes_actuales=request.form.getlist("ingredientes"),
         min_ing=MIN_INGREDIENTES, max_ing=MAX_INGREDIENTES,
     )
@@ -173,11 +185,12 @@ def fabrica_editar(pizza_id):
 
     if request.method == "POST":
         try:
-            nombre, ingredientes, refresco, precio = _pizza_fields_from_form()
+            nombre, ingredientes, refresco, precio, entrega = _pizza_fields_from_form()
 
             ok, _, error = database.replicate_write(
-                "UPDATE pizzas SET nombre=?, ingredientes=?, refresco=?, precio=? WHERE id=?",
-                (nombre, ",".join(ingredientes), refresco, precio, pizza_id),
+                "UPDATE pizzas SET nombre=?, ingredientes=?, refresco=?, precio=?, entrega=? "
+                "WHERE id=?",
+                (nombre, ",".join(ingredientes), refresco, precio, entrega, pizza_id),
             )
             if not ok:
                 raise RuntimeError(error)
@@ -195,6 +208,7 @@ def fabrica_editar(pizza_id):
         "fabrica_form.html", pizza=pizza,
         ingredientes_disponibles=INGREDIENTES_DISPONIBLES,
         refrescos_disponibles=REFRESCOS_DISPONIBLES,
+        entregas_pizza=ENTREGAS_PIZZA, entrega_actual=pizza["entrega"],
         ingredientes_actuales=ingredientes_actuales,
         min_ing=MIN_INGREDIENTES, max_ing=MAX_INGREDIENTES,
     )
@@ -296,6 +310,11 @@ def pedidos():
             conn.close()
             if pizza is None:
                 raise ValueError("La pizza seleccionada no existe.")
+            if pizza["entrega"] != "AMBOS" and retiro_o_flete != pizza["entrega"]:
+                raise ValueError(
+                    f"La pizza '{pizza['nombre']}' solo está disponible para "
+                    f"{ENTREGAS_PIZZA[pizza['entrega']].removeprefix('Solo ')}."
+                )
 
             total = round(pizza["precio"] * cantidad, 2)
             fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -337,7 +356,7 @@ def pedidos():
             flash(f"Error al crear el pedido: {e}", "danger")
 
     return render_template(
-        "pedidos.html", pizzas=pizzas, pedidos=lista_pedidos,
+        "pedidos.html", pizzas=pizzas, pedidos=lista_pedidos, entregas_pizza=ENTREGAS_PIZZA,
         refrescos_disponibles=REFRESCOS_DISPONIBLES,
         selected_pizza_id=selected_pizza_id,
         form=request.form if request.method == "POST" else {},

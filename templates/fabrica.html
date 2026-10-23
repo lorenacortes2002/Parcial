@@ -16,7 +16,7 @@
 <div class="table-wrap">
 <table class="tabla">
   <thead>
-    <tr><th>#</th><th>Nombre</th><th>Ingredientes</th><th>Refresco</th><th>Precio</th><th>Acciones</th></tr>
+    <tr><th>#</th><th>Nombre</th><th>Ingredientes</th><th>Refresco</th><th>Entrega</th><th>Precio</th><th>Acciones</th></tr>
   </thead>
   <tbody>
     {% for p in pizzas %}
@@ -25,6 +25,7 @@
       <td>{{ p.nombre }}</td>
       <td>{{ p.ingredientes.replace(',', ', ') }}</td>
       <td>{{ p.refresco }}</td>
+      <td><span class="estado entrega-badge">{{ entregas_pizza[p.entrega] }}</span></td>
       <td>${{ "%.2f"|format(p.precio) }}</td>
       <td class="acciones">
         <a href="{{ url_for('fabrica_editar', pizza_id=p.id) }}">Editar</a>
@@ -35,7 +36,7 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="6">Todavía no hay pizzas registradas. Crea la primera para completar el menú.</td></tr>
+    <tr><td colspan="7">Todavía no hay pizzas registradas. Crea la primera para completar el menú.</td></tr>
     {% endfor %}
   </tbody>
 </table>
