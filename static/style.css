@@ -283,6 +283,46 @@ main.container { animation: content-enter .55s cubic-bezier(.2, .7, .25, 1) both
 .duo-parts li { margin: 0 0 6px; color: var(--muted); font-size: .9rem; line-height: 1.45; }
 .duo-parts strong { color: var(--ink); }
 .menu-subtitle { margin: 40px 0 16px; font-size: 1.35rem; }
+
+/* --- Pedido con varios productos (carrito) --------------------------- */
+.order-steps { display: flex; min-width: 0; flex-direction: column; gap: 22px; }
+.order-form { max-width: none; }
+.step-title { margin: 0 0 18px; font-size: 1.45rem; }
+.item-fields { min-width: 0; margin: 0; padding: 0; border: 0; }
+.item-fields .type-options { margin-bottom: 18px; }
+.type-options--two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.product-choice[hidden] { display: none; }
+.soda-note { margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; color: #536357; background: #f1f4ee; font-size: .84rem; }
+.soda-note[hidden] { display: none; }
+.item-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px dashed #cfd8cc;
+  border-radius: 12px;
+  color: var(--muted);
+  background: #fbfcf9;
+  font-size: .86rem;
+}
+.item-preview strong { color: var(--ink); }
+.item-preview__total { margin-left: auto; }
+.item-preview__total strong { color: var(--green); font-size: 1.05rem; }
+.cart-list { display: flex; flex-direction: column; gap: 10px; margin: 0 0 6px; padding: 0; list-style: none; }
+.cart-line {
+  position: relative;
+  padding: 12px 14px;
+  border: 1px solid #d8e1d8;
+  border-radius: 12px;
+  background: #fff;
+  animation: content-enter .3s ease-out both;
+}
+.cart-line__head { display: flex; justify-content: space-between; gap: 10px; font-size: .9rem; }
+.cart-line__head span { color: var(--green); font-weight: 700; white-space: nowrap; }
+.cart-line small { display: block; margin-top: 4px; color: var(--muted); font-size: .78rem; line-height: 1.45; }
+.cart-line__remove { margin-top: 6px; font-size: .8rem; }
+.cart-empty { margin: 0; padding: 16px; border: 1px dashed #cdd8cc; border-radius: 12px; color: var(--muted); background: #f7faf5; font-size: .88rem; }
 .menu-section + .menu-section { margin-top: 56px; }
 
 /* --- Tipo de producto en la Fábrica ---------------------------------- */

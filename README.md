@@ -38,9 +38,13 @@ Abrir **http://127.0.0.1:5000**
 - El catálogo inicia con cinco combos, la versión individual de cada uno, tres pizzas individuales más
   (Margarita, Pepperoni, Jamón y Champiñones) y tres combos de 2 pizzas que las combinan. No permite
   eliminar (ni convertir en pizza) un combo si quedarían menos de cinco (cuentan ambos tipos de combo).
-- `/pedidos` → El cliente elige un combo o una pizza (solo los combos muestran la sección de sodas);
-  se guarda en `db_local.sqlite3`, se **replica** en `db_replica.sqlite3` y se genera un JSON en
-  `pedidos_json/`. El correo **no** se envía todavía: se envía al confirmarse el pago.
+- `/pedidos` → El cliente arma su pedido como un carrito: elige **Combos** o **Pizzas individuales**,
+  la cantidad y sus sodas (cantidad, tamaño y sabores), pulsa «Agregar al pedido» y repite con
+  otros productos; cada línea se puede quitar. Las sodas tienen precio por tamaño (lata $1.00,
+  botella 20 oz $1.50, 1 litro $2.25, 2 litros $3.00); cada combo incluye una lata, así que con un
+  tamaño mayor se paga la diferencia y las sodas extra se cobran completas. Al confirmar, el pedido
+  y sus productos (`pedido_items`) se guardan en `db_local.sqlite3`, se **replican** en
+  `db_replica.sqlite3` y se genera un JSON en `pedidos_json/`. El correo **no** se envía todavía: se envía al confirmarse el pago.
   Si se elige **Flete a domicilio** aparece el campo **Dirección de entrega**, que es obligatorio
   y se guarda en el pedido, su JSON y los correos.
 - `/pagos` → Genera un **cobro Yappy** con un código único (p. ej. `CC-7K3P9Q`) y abre

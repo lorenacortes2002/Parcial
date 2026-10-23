@@ -486,7 +486,7 @@ class ProjectRequirementsTests(unittest.TestCase):
         self.assertLess(menu.index("Hawaiana"), menu.index("Pizzas individuales"))
         self.assertGreater(menu.index("<h3>Solo Pepperoni</h3>"), menu.index("Pizzas individuales"))
 
-        # Al pedir una pizza individual no se guardan sodas.
+        # Las pizzas individuales también pueden llevar sodas (se cobran todas).
         self.client.post(
             "/pedidos",
             data={
@@ -501,8 +501,8 @@ class ProjectRequirementsTests(unittest.TestCase):
             },
         )
         self.assertEqual(
-            self._rows(self.local_path, "SELECT refresco, refresco_cantidad FROM pedidos"),
-            [("Ninguno", 0)],
+            self._rows(self.local_path, "SELECT refresco, refresco_cantidad, total FROM pedidos"),
+            [("2× Sprite (1 litro)", 2, 10.5)],  # 6.00 + 2 × 2.25
         )
 
         # Las pizzas individuales se pueden borrar; los combos mantienen el mínimo.
@@ -601,8 +601,102 @@ class ProjectRequirementsTests(unittest.TestCase):
         )
         self.assertEqual(
             self._rows(self.local_path, "SELECT refresco, total FROM pedidos"),
-            [("2× Agua (Lata 12 oz)", 12.0)],
+            # 1 lata incluida en el combo + 1 lata extra ($1.00).
+            [("2× Agua (Lata 12 oz)", 13.0)],
         )
+
+    def test_cart_with_several_combos_and_pizzas(self):
+        ids = {
+            (nombre, tipo): pid for pid, nombre, tipo in
+            self._rows(self.local_path, "SELECT id, nombre, tipo FROM pizzas")
+        }
+        combo = ids[("Hawaiana", "COMBO")]          # $7.75, incluye lata
+        pizza = ids[("Margarita", "PIZZA")]         # $5.50
+        duo = ids[("Dúo Margarita + Pepperoni", "DUO")]  # $12.50
+
+        # Combo ×2 con 2 botellas de 20 oz: 2 × (1.50 − 1.00) = 1.00 de sodas.
+        self.client.post("/pedidos/agregar", data={
+            "categoria": "COMBO", "pizza_id": str(combo), "cantidad": "2",
+            "refresco_cantidad": "2", "refresco_tamano": "BOTELLA 20 OZ",
+            "refrescos": ["Sprite", "Fanta"], "cant_Sprite": "1", "cant_Fanta": "1",
+            "cliente": "Ana",
+        })
+        # Pizza individual con 1 lata: 5.50 + 1.00.
+        self.client.post("/pedidos/agregar", data={
+            "categoria": "PIZZA", "pizza_id": str(pizza), "cantidad": "1",
+            "refresco_cantidad": "1", "refresco_tamano": "LATA 12 OZ",
+            "refrescos": ["Coca-Cola"], "cliente": "Ana",
+        })
+        # Pizza individual sin soda: 5.50.
+        self.client.post("/pedidos/agregar", data={
+            "categoria": "PIZZA", "pizza_id": str(pizza), "cantidad": "1",
+            "refresco_cantidad": "0", "cliente": "Ana",
+        })
+        # Combo de 2 pizzas sin soda: 12.50 (no se descuenta la lata incluida).
+        self.client.post("/pedidos/agregar", data={
+            "categoria": "COMBO", "pizza_id": str(duo), "cantidad": "1",
+            "refresco_cantidad": "0", "cliente": "Ana",
+        })
+        page = self.client.get("/pedidos").get_data(as_text=True)
+        self.assertIn("2× Combo Hawaiana", page)
+        self.assertIn("1× Pizza Margarita", page)
+        self.assertIn('value="Ana"', page)  # los datos del cliente se conservan
+        self.assertIn("$41.00", page)       # 16.50 + 6.50 + 5.50 + 12.50
+
+        # Quitar la pizza sin soda.
+        self.client.post("/pedidos/quitar/2", data={"cliente": "Ana"})
+        self.assertIn("$35.50", self.client.get("/pedidos").get_data(as_text=True))
+
+        self.client.post("/pedidos", data={
+            "cliente": "Ana", "correo_cliente": "ana@example.com",
+            "retiro_o_flete": "RETIRO EN SITIO",
+        })
+        pedido = self._rows(
+            self.local_path, "SELECT id, total, detalle, cantidad FROM pedidos"
+        )[0]
+        self.assertEqual(
+            pedido[1:],
+            (35.5, "2× Combo Hawaiana, 1× Pizza Margarita, 1× Dúo Margarita + Pepperoni", 4),
+        )
+        for path in (self.local_path, self.replica_path):
+            self.assertEqual(
+                self._rows(path, "SELECT pizza_id, cantidad, sodas, precio_sodas, subtotal "
+                                 "FROM pedido_items WHERE pedido_id=? ORDER BY id", (pedido[0],)),
+                [
+                    (combo, 2, "1× Sprite, 1× Fanta (Botella 20 oz)", 1.0, 16.5),
+                    (pizza, 1, "1× Coca-Cola (Lata 12 oz)", 1.0, 6.5),
+                    (duo, 1, "Ninguno", 0.0, 12.5),
+                ],
+            )
+        order_json = json.loads(next(self.pedidos_dir.glob("*.json")).read_text(encoding="utf-8"))
+        self.assertEqual(len(order_json["items"]), 3)
+        self.assertEqual(order_json["total"], 35.5)
+
+        # Tras confirmar, el carrito queda vacío.
+        self.assertIn("Todavía no has agregado productos", self.client.get("/pedidos").get_data(as_text=True))
+
+    def test_cart_rejects_incompatible_delivery(self):
+        ids = dict(self._rows(self.local_path, "SELECT nombre, id FROM pizzas WHERE tipo='PIZZA'"))
+        for nombre, entrega in (("Margarita", "RETIRO EN SITIO"), ("Pepperoni", "FLETE A DOMICILIO")):
+            self.client.post(f"/fabrica/editar/{ids[nombre]}", data={
+                "tipo": "PIZZA", "nombre": nombre, "ingredientes": ["pepperoni"],
+                "precio": "6.00", "entrega": entrega,
+            })
+        self.client.post("/pedidos/agregar", data={
+            "categoria": "PIZZA", "pizza_id": str(ids["Margarita"]), "cantidad": "1",
+            "refresco_cantidad": "0",
+        })
+        rejected = self.client.post("/pedidos/agregar", data={
+            "categoria": "PIZZA", "pizza_id": str(ids["Pepperoni"]), "cantidad": "1",
+            "refresco_cantidad": "0",
+        }, follow_redirects=True)
+        self.assertIn("no se puede combinar".encode(), rejected.data)
+        to_home = self.client.post("/pedidos", data={
+            "cliente": "Ana", "correo_cliente": "ana@example.com",
+            "retiro_o_flete": "FLETE A DOMICILIO", "direccion": "David, Barrio Bolívar, casa 24",
+        }, follow_redirects=True)
+        self.assertIn("solo está disponible para retiro en sitio".encode(), to_home.data)
+        self.assertEqual(self._rows(self.local_path, "SELECT COUNT(*) FROM pedidos")[0][0], 0)
 
     def test_unknown_yappy_code_is_handled(self):
         self.assertEqual(self.client.get("/yappy/pagar/CC-NOPE00").status_code, 404)

@@ -21,7 +21,9 @@ import re
 import sqlite3
 from datetime import datetime
 
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
+from flask import (
+    Flask, render_template, request, redirect, url_for, flash, jsonify, session,
+)
 
 import database
 from utils import (
@@ -60,6 +62,14 @@ TAMANOS_SODA = {
     "2 LITROS": "2 litros",
 }
 MAX_SODAS = 20
+# Precio de cada soda según su tamaño (USD). Los combos incluyen una lata por combo.
+PRECIOS_SODA = {
+    "LATA 12 OZ": 1.00,
+    "BOTELLA 20 OZ": 1.50,
+    "1 LITRO": 2.25,
+    "2 LITROS": 3.00,
+}
+TAMANO_SODA_INCLUIDA = "LATA 12 OZ"
 
 
 def _sodas_from_form():
@@ -454,54 +464,187 @@ def fabrica_eliminar(pizza_id):
 
 
 # ----------------------------------------------------------------------
-# PEDIDOS — el cliente arma su combo; se confirma por JSON/correo,
-# se guarda en la DB local y se replica en la DB de réplica.
+# PEDIDOS — el cliente arma un carrito con combos y/o pizzas individuales
+# (cada uno con sus sodas), indica sus datos y confirma. El pedido se guarda
+# en la DB local y se replica; el JSON se envía por correo al pagarlo.
 # ----------------------------------------------------------------------
+MAX_CANTIDAD_ITEM = 50
+MAX_ITEMS_CARRITO = 15
+CAMPOS_CLIENTE = ("cliente", "correo_cliente", "retiro_o_flete", "direccion")
+
+
+def _precio_sodas(producto, cantidad, sodas_cantidad, sodas_tamano):
+    """
+    Costo de las sodas de una línea del pedido. Cada combo incluye una lata
+    de 12 oz: con un tamaño mayor se paga la diferencia, y las sodas extra
+    se cobran completas. En las pizzas individuales todas las sodas se cobran.
+    """
+    if not sodas_cantidad:
+        return 0.0
+    precio = PRECIOS_SODA[sodas_tamano]
+    if producto["tipo"] not in TIPOS_COMBO:
+        return round(sodas_cantidad * precio, 2)
+    incluidas = min(sodas_cantidad, cantidad)
+    extra = sodas_cantidad - incluidas
+    diferencia = precio - PRECIOS_SODA[TAMANO_SODA_INCLUIDA]
+    return round(incluidas * diferencia + extra * precio, 2)
+
+
+def _nombre_en_pedido(producto):
+    if producto["tipo"] == "COMBO":
+        return f"Combo {producto['nombre']}"
+    if producto["tipo"] == "PIZZA":
+        return f"Pizza {producto['nombre']}"
+    return producto["nombre"]  # los combos de 2 pizzas ya se llaman «Dúo …»
+
+
+def _item_from_form(productos_por_id):
+    """Lee el producto que el cliente está agregando (producto, cantidad y sodas)."""
+    # Hay un selector de combos y otro de pizzas individuales; el navegador solo
+    # envía el de la categoría activa, pero sin JavaScript llegan ambos.
+    valores = request.form.getlist("pizza_id")
+    if len(valores) > 1:
+        valores = valores[1:] if request.form.get("categoria") == "PIZZA" else valores[:1]
+    try:
+        pizza_id = int(valores[0] if valores else "")
+        cantidad = int(request.form.get("cantidad", 1))
+    except ValueError:
+        raise ValueError("Seleccione un producto y una cantidad válida.")
+    if pizza_id not in productos_por_id:
+        raise ValueError("La pizza seleccionada no existe.")
+    if cantidad < 1 or cantidad > MAX_CANTIDAD_ITEM:
+        raise ValueError(f"La cantidad debe estar entre 1 y {MAX_CANTIDAD_ITEM}.")
+    sodas_cantidad, sodas_tamano, sodas_detalle = _sodas_from_form()
+    return {
+        "pizza_id": pizza_id, "cantidad": cantidad,
+        "sodas_cantidad": sodas_cantidad, "sodas_tamano": sodas_tamano,
+        "sodas_detalle": [list(par) for par in sodas_detalle],
+    }
+
+
+def _resolver_carrito(carrito, productos_por_id):
+    """Calcula nombre, precios y subtotal de cada línea con los precios actuales."""
+    lineas = []
+    for item in carrito:
+        producto = productos_por_id.get(item["pizza_id"])
+        if producto is None:
+            continue  # el producto se eliminó del menú
+        detalle = [tuple(par) for par in item["sodas_detalle"]]
+        precio_pizzas = round(producto["precio"] * item["cantidad"], 2)
+        precio_sodas = _precio_sodas(
+            producto, item["cantidad"], item["sodas_cantidad"], item["sodas_tamano"]
+        )
+        lineas.append({
+            **item,
+            "producto": producto,
+            "nombre": _nombre_en_pedido(producto),
+            "sodas": _describir_sodas(item["sodas_cantidad"], item["sodas_tamano"], detalle),
+            "precio_pizzas": precio_pizzas,
+            "precio_sodas": precio_sodas,
+            "subtotal": round(precio_pizzas + precio_sodas, 2),
+        })
+    return lineas
+
+
+def _entrega_permitida(lineas):
+    """
+    Forma de entrega que admite todo el carrito: "AMBOS", una sola opción,
+    o None si hay productos solo para retiro y otros solo a domicilio.
+    """
+    restricciones = {l["producto"]["entrega"] for l in lineas} - {"AMBOS"}
+    if len(restricciones) > 1:
+        return None
+    return restricciones.pop() if restricciones else "AMBOS"
+
+
+def _guardar_borrador_cliente():
+    """Conserva los datos del cliente entre «Agregar» / «Quitar» y la confirmación."""
+    session["pedido_borrador"] = {
+        campo: request.form.get(campo, "") for campo in CAMPOS_CLIENTE
+    }
+
+
+def _cargar_pagina_pedidos():
+    conn = database.get_local_conn()
+    try:
+        productos = _cargar_productos(conn)
+        lista_pedidos = conn.execute(
+            "SELECT pedidos.*, COALESCE(pedidos.detalle, pedidos.cantidad || '× ' || pizzas.nombre) "
+            "AS pizza_nombre FROM pedidos JOIN pizzas ON pedidos.pizza_id = pizzas.id "
+            "ORDER BY pedidos.id DESC"
+        ).fetchall()
+    finally:
+        conn.close()
+    return productos, lista_pedidos
+
+
+@app.route("/pedidos/agregar", methods=["POST"])
+def pedidos_agregar():
+    _guardar_borrador_cliente()
+    try:
+        productos, _ = _cargar_pagina_pedidos()
+        productos_por_id = {p["id"]: p for p in productos}
+        carrito = session.get("carrito", [])
+        if len(carrito) >= MAX_ITEMS_CARRITO:
+            raise ValueError(f"El pedido admite como máximo {MAX_ITEMS_CARRITO} productos.")
+        item = _item_from_form(productos_por_id)
+        nuevo = _resolver_carrito(carrito + [item], productos_por_id)
+        if _entrega_permitida(nuevo) is None:
+            raise ValueError(
+                "Este producto no se puede combinar con los del pedido: unos son solo "
+                "para retiro en sitio y otros solo a domicilio."
+            )
+        session["carrito"] = carrito + [item]
+        linea = nuevo[-1]
+        flash(f"Agregado al pedido: {linea['cantidad']}× {linea['nombre']}.", "success")
+    except (ValueError, sqlite3.Error) as e:
+        flash(f"No se pudo agregar: {e}", "danger")
+    return redirect(url_for("pedidos") + "#tu-pedido")
+
+
+@app.route("/pedidos/quitar/<int:indice>", methods=["POST"])
+def pedidos_quitar(indice):
+    _guardar_borrador_cliente()
+    carrito = session.get("carrito", [])
+    if 0 <= indice < len(carrito):
+        carrito.pop(indice)
+        session["carrito"] = carrito
+        flash("Producto quitado del pedido.", "success")
+    return redirect(url_for("pedidos") + "#tu-pedido")
+
+
 @app.route("/pedidos", methods=["GET", "POST"])
 def pedidos():
     try:
-        conn = database.get_local_conn()
-        pizzas = conn.execute("SELECT * FROM pizzas ORDER BY id").fetchall()
-        lista_pedidos = conn.execute(
-            "SELECT pedidos.*, pizzas.nombre AS pizza_nombre "
-            "FROM pedidos JOIN pizzas ON pedidos.pizza_id = pizzas.id "
-            "ORDER BY pedidos.id DESC"
-        ).fetchall()
-        conn.close()
+        productos, lista_pedidos = _cargar_pagina_pedidos()
     except sqlite3.Error as e:
         flash(f"Error al cargar datos: {e}", "danger")
-        pizzas, lista_pedidos = [], []
-
-    selected_pizza_id = (
-        request.form.get("pizza_id", "")
-        if request.method == "POST"
-        else request.args.get("pizza_id", "")
-    )
-    try:
-        selected_pizza_id = int(selected_pizza_id) if selected_pizza_id else None
-    except ValueError:
-        selected_pizza_id = None
-        flash("La pizza solicitada no es válida; selecciona una opción del menú.", "warning")
-
-    pizza_ids = {pizza["id"] for pizza in pizzas}
-    if selected_pizza_id not in pizza_ids:
-        selected_pizza_id = pizzas[0]["id"] if pizzas else None
+        productos, lista_pedidos = [], []
+    productos_por_id = {p["id"]: p for p in productos}
 
     if request.method == "POST":
+        _guardar_borrador_cliente()
         try:
             cliente = request.form.get("cliente", "").strip()
             correo_cliente = request.form.get("correo_cliente", "").strip()
-            pizza_id = int(request.form.get("pizza_id"))
-            cantidad = int(request.form.get("cantidad", 1))
             retiro_o_flete = request.form.get("retiro_o_flete", "RETIRO EN SITIO")
             direccion = " ".join(request.form.get("direccion", "").split())
+
+            # Si el carrito está vacío, se confirma el producto que está en pantalla.
+            carrito = session.get("carrito") or [_item_from_form(productos_por_id)]
+            lineas = _resolver_carrito(carrito, productos_por_id)
+            if not lineas:
+                raise ValueError("Agregue al menos un producto al pedido.")
+            if len(lineas) != len(carrito):
+                session["carrito"] = [l for l in carrito if l["pizza_id"] in productos_por_id]
+                raise ValueError(
+                    "Algún producto del pedido ya no está en el menú y se quitó; revise el pedido."
+                )
 
             if not cliente or not correo_cliente:
                 raise ValueError("Debe indicar nombre y correo del cliente.")
             if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", correo_cliente):
                 raise ValueError("Indique un correo electrónico válido.")
-            if cantidad < 1:
-                raise ValueError("La cantidad debe ser al menos 1.")
             if retiro_o_flete not in ("RETIRO EN SITIO", "FLETE A DOMICILIO"):
                 raise ValueError("Seleccione un método de entrega válido.")
             if retiro_o_flete == "FLETE A DOMICILIO":
@@ -517,47 +660,78 @@ def pedidos():
             else:
                 direccion = None
 
-            conn = database.get_local_conn()
-            pizza = conn.execute("SELECT * FROM pizzas WHERE id=?", (pizza_id,)).fetchone()
-            conn.close()
-            if pizza is None:
-                raise ValueError("La pizza seleccionada no existe.")
-            if pizza["tipo"] in TIPOS_COMBO:
-                sodas_cantidad, sodas_tamano, sodas_detalle = _sodas_from_form()
-            else:
-                # Solo los combos incluyen sodas.
-                sodas_cantidad, sodas_tamano, sodas_detalle = 0, None, []
-            refresco = _describir_sodas(sodas_cantidad, sodas_tamano, sodas_detalle)
-            if pizza["entrega"] != "AMBOS" and retiro_o_flete != pizza["entrega"]:
+            permitida = _entrega_permitida(lineas)
+            if permitida not in ("AMBOS", retiro_o_flete):
+                if len(lineas) == 1:
+                    producto = lineas[0]["producto"]
+                    raise ValueError(
+                        f"La pizza '{producto['nombre']}' solo está disponible para "
+                        f"{ENTREGAS_PIZZA[producto['entrega']].removeprefix('Solo ')}."
+                    )
                 raise ValueError(
-                    f"La pizza '{pizza['nombre']}' solo está disponible para "
-                    f"{ENTREGAS_PIZZA[pizza['entrega']].removeprefix('Solo ')}."
+                    "Algún producto del pedido no admite esa forma de entrega."
+                    if permitida else
+                    "El pedido mezcla productos solo para retiro y solo a domicilio."
                 )
 
-            total = round(pizza["precio"] * cantidad, 2)
+            total = round(sum(l["subtotal"] for l in lineas), 2)
             fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            detalle = ", ".join(f"{l['cantidad']}× {l['nombre']}" for l in lineas)
+            con_sodas = [l for l in lineas if l["sodas_cantidad"]]
+            refresco = "; ".join(l["sodas"] for l in con_sodas) or "Ninguno"
+            tamanos = {l["sodas_tamano"] for l in con_sodas}
 
             ok, pedido_id, error = database.replicate_write(
                 "INSERT INTO pedidos (cliente, correo_cliente, pizza_id, refresco, "
                 "refresco_cantidad, refresco_tamano, "
-                "cantidad, total, estado, retiro_o_flete, direccion, fecha) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                (cliente, correo_cliente, pizza_id, refresco,
-                 sodas_cantidad, sodas_tamano, cantidad, total,
-                 "CONFIRMADO", retiro_o_flete, direccion, fecha),
+                "cantidad, total, estado, retiro_o_flete, direccion, fecha, detalle) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (cliente, correo_cliente, lineas[0]["pizza_id"], refresco,
+                 sum(l["sodas_cantidad"] for l in lineas),
+                 tamanos.pop() if len(tamanos) == 1 else None,
+                 sum(l["cantidad"] for l in lineas), total,
+                 "CONFIRMADO", retiro_o_flete, direccion, fecha, detalle),
             )
             if not ok:
                 raise RuntimeError(error)
             if error:
                 flash(error, "warning")
 
+            ok, _, error = database.replicate_transaction([
+                (
+                    "INSERT INTO pedido_items (pedido_id, pizza_id, cantidad, precio_unitario, "
+                    "sodas, sodas_cantidad, sodas_tamano, precio_sodas, subtotal) "
+                    "VALUES (?,?,?,?,?,?,?,?,?)",
+                    (pedido_id, l["pizza_id"], l["cantidad"], l["producto"]["precio"],
+                     l["sodas"], l["sodas_cantidad"], l["sodas_tamano"],
+                     l["precio_sodas"], l["subtotal"]),
+                )
+                for l in lineas
+            ])
+            if not ok:
+                database.replicate_write("DELETE FROM pedidos WHERE id=?", (pedido_id,))
+                raise RuntimeError(error)
+            if error:
+                flash(error, "warning")
+
             pedido_dict = {
                 "id": pedido_id, "cliente": cliente, "correo_cliente": correo_cliente,
-                "pizza_nombre": pizza["nombre"], "refresco": refresco, "cantidad": cantidad,
-                "refresco_cantidad": sodas_cantidad,
-                "refresco_tamano": TAMANOS_SODA.get(sodas_tamano),
+                "pizza_nombre": detalle, "refresco": refresco,
+                "cantidad": sum(l["cantidad"] for l in lineas),
+                "refresco_cantidad": sum(l["sodas_cantidad"] for l in lineas),
+                "refresco_tamano": ", ".join(sorted(TAMANOS_SODA[t] for t in tamanos)) or None,
                 "refrescos_detalle": [
-                    {"sabor": sabor, "cantidad": n} for sabor, n in sodas_detalle
+                    {"sabor": sabor, "cantidad": n}
+                    for l in lineas for sabor, n in l["sodas_detalle"]
+                ],
+                "items": [
+                    {
+                        "producto": l["nombre"], "tipo": l["producto"]["tipo"],
+                        "cantidad": l["cantidad"], "precio_unitario": l["producto"]["precio"],
+                        "sodas": l["sodas"], "precio_sodas": l["precio_sodas"],
+                        "subtotal": l["subtotal"],
+                    }
+                    for l in lineas
                 ],
                 "total": total, "retiro_o_flete": retiro_o_flete,
                 "direccion": direccion, "estado": "CONFIRMADO", "fecha": fecha,
@@ -572,18 +746,48 @@ def pedidos():
                 "success",
             )
 
+            session.pop("carrito", None)
+            session.pop("pedido_borrador", None)
             flash(f"Pedido #{pedido_id} confirmado y guardado en ambas bases.", "success")
             return redirect(url_for("pedidos"))
 
-        except (ValueError, RuntimeError, TypeError) as e:
+        except (ValueError, RuntimeError, TypeError, sqlite3.Error) as e:
             flash(f"Error al crear el pedido: {e}", "danger")
 
+    # Producto preseleccionado (p. ej. desde el botón «Pedir» del menú).
+    selected_pizza_id = (
+        request.form.get("pizza_id", "")
+        if request.method == "POST"
+        else request.args.get("pizza_id", "")
+    )
+    try:
+        selected_pizza_id = int(selected_pizza_id) if selected_pizza_id else None
+    except ValueError:
+        selected_pizza_id = None
+        flash("La pizza solicitada no es válida; selecciona una opción del menú.", "warning")
+    if selected_pizza_id not in productos_por_id:
+        selected_pizza_id = productos[0]["id"] if productos else None
+    categoria = (
+        "PIZZA" if selected_pizza_id and productos_por_id[selected_pizza_id]["tipo"] == "PIZZA"
+        else "COMBO"
+    )
+
+    lineas = _resolver_carrito(session.get("carrito", []), productos_por_id)
+    borrador = session.get("pedido_borrador", {})
     return render_template(
-        "pedidos.html", pizzas=pizzas, pedidos=lista_pedidos, entregas_pizza=ENTREGAS_PIZZA,
-        sabores_soda=SABORES_SODA, tamanos_soda=TAMANOS_SODA, max_sodas=MAX_SODAS,
+        "pedidos.html",
+        combos=[p for p in productos if p["tipo"] in TIPOS_COMBO],
+        individuales=[p for p in productos if p["tipo"] == "PIZZA"],
+        categoria=categoria, selected_pizza_id=selected_pizza_id,
+        pedidos=lista_pedidos, entregas_pizza=ENTREGAS_PIZZA,
+        carrito=lineas, total_carrito=round(sum(l["subtotal"] for l in lineas), 2),
+        entrega_carrito=_entrega_permitida(lineas) if lineas else "",
+        sabores_soda=SABORES_SODA, tamanos_soda=TAMANOS_SODA, precios_soda=PRECIOS_SODA,
+        tamano_incluido=TAMANO_SODA_INCLUIDA, max_sodas=MAX_SODAS,
+        max_cantidad=MAX_CANTIDAD_ITEM,
         sabores_elegidos=request.form.getlist("refrescos") if request.method == "POST" else [],
-        selected_pizza_id=selected_pizza_id,
         form=request.form if request.method == "POST" else {},
+        cliente=borrador,
         min_direccion=MIN_DIRECCION, max_direccion=MAX_DIRECCION,
     )
 
@@ -601,7 +805,8 @@ ESTADOS_PAGADOS = ("PAGADO", "PAGADO - DESPACHAR (FLETE)")
 
 def _obtener_pedido(conn, pedido_id):
     return conn.execute(
-        "SELECT pedidos.*, pizzas.nombre AS pizza_nombre FROM pedidos "
+        "SELECT pedidos.*, COALESCE(pedidos.detalle, pedidos.cantidad || '× ' || pizzas.nombre) "
+        "AS pizza_nombre FROM pedidos "
         "JOIN pizzas ON pedidos.pizza_id = pizzas.id WHERE pedidos.id=?",
         (pedido_id,),
     ).fetchone()
@@ -735,7 +940,8 @@ def pagos():
     try:
         conn = database.get_local_conn()
         pedidos_pendientes = conn.execute(
-            "SELECT pedidos.*, pizzas.nombre AS pizza_nombre FROM pedidos "
+            "SELECT pedidos.*, COALESCE(pedidos.detalle, pedidos.cantidad || '× ' || pizzas.nombre) "
+        "AS pizza_nombre FROM pedidos "
             "JOIN pizzas ON pedidos.pizza_id = pizzas.id "
             "WHERE pedidos.estado NOT IN ('PAGADO', 'PAGADO - DESPACHAR (FLETE)') "
             "AND NOT EXISTS (SELECT 1 FROM pagos WHERE pagos.pedido_id=pedidos.id) "

@@ -1,82 +1,62 @@
-const pizzaSelect = document.querySelector("#pizza-id");
-const quantityInput = document.querySelector("#cantidad");
-const deliverySelect = document.querySelector("#entrega");
+const orderForm = document.querySelector("#pedido-form");
 
-if (pizzaSelect && quantityInput && deliverySelect) {
-  const summaryPizza = document.querySelector("#summary-pizza");
-  const summaryUnit = document.querySelector("#summary-unit");
-  const summaryQuantity = document.querySelector("#summary-quantity");
-  const summaryDelivery = document.querySelector("#summary-delivery");
-  const summaryTotal = document.querySelector("#summary-total");
-  const addressField = document.querySelector("#direccion-field");
-  const addressInput = document.querySelector("#direccion");
-  const summaryAddressRow = document.querySelector("#summary-address-row");
-  const summaryAddress = document.querySelector("#summary-address");
-  const currency = new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-  });
+if (orderForm) {
+  const currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+  const money = (value) => currency.format(Math.round(value * 100) / 100);
 
-  const deliveryHelp = document.querySelector("#entrega-help");
+  // --- Paso 1: combo o pizza individual -----------------------------------
+  const categoryRadios = [...document.querySelectorAll('input[name="categoria"]')];
+  const productChoices = [...document.querySelectorAll(".product-choice")];
+  const quantityInput = document.querySelector("#cantidad");
 
-  // Cada pizza define en Fábrica si admite domicilio, retiro o ambos:
-  // se desactiva la opción no permitida y se cambia a la que sí lo está.
-  const applyPizzaDelivery = () => {
-    const allowed = pizzaSelect.selectedOptions[0]?.dataset.entrega ?? "AMBOS";
-    [...deliverySelect.options].forEach((option) => {
-      option.disabled = allowed !== "AMBOS" && option.value !== allowed;
+  const category = () => categoryRadios.find((r) => r.checked)?.value ?? "COMBO";
+  const activeSelect = () =>
+    productChoices.find((c) => c.dataset.categoria === category())?.querySelector("select");
+  const selectedProduct = () => activeSelect()?.selectedOptions[0];
+  const isCombo = () => (selectedProduct()?.dataset.tipo ?? "PIZZA") !== "PIZZA";
+  const quantity = () => Math.max(1, Number.parseInt(quantityInput.value, 10) || 1);
+
+  // Solo se envía el selector de la categoría elegida.
+  const applyCategory = () => {
+    productChoices.forEach((choice) => {
+      const active = choice.dataset.categoria === category();
+      choice.hidden = !active;
+      choice.querySelector("select").disabled = !active;
     });
-    if (deliverySelect.selectedOptions[0]?.disabled) deliverySelect.value = allowed;
-
-    if (deliveryHelp) {
-      deliveryHelp.hidden = allowed === "AMBOS";
-      deliveryHelp.textContent =
-        allowed === "FLETE A DOMICILIO"
-          ? "Este combo solo se entrega a domicilio."
-          : "Este combo solo está disponible para retiro en sitio.";
-    }
   };
 
-  const updateSummary = () => {
-    const selected = pizzaSelect.selectedOptions[0];
-    const unitPrice = Number(selected?.dataset.price ?? 0);
-    const quantity = Math.max(1, Number.parseInt(quantityInput.value, 10) || 1);
-    const isDelivery = deliverySelect.value === "FLETE A DOMICILIO";
-    const deliveryLabel = isDelivery ? "Flete a domicilio" : "Retiro en sitio";
-
-    // La dirección solo se pide (y es obligatoria) cuando el pedido va a domicilio.
-    if (addressField && addressInput) {
-      addressField.hidden = !isDelivery;
-      addressInput.required = isDelivery;
-      addressInput.disabled = !isDelivery;
-      summaryAddressRow.hidden = !isDelivery;
-      summaryAddress.textContent = addressInput.value.trim() || "Pendiente";
-    }
-
-    summaryPizza.textContent = selected?.textContent.split(" — ")[0].trim() ?? "Selecciona una pizza";
-    summaryUnit.textContent = currency.format(unitPrice);
-    summaryQuantity.textContent = String(quantity);
-    summaryDelivery.textContent = deliveryLabel;
-    summaryTotal.textContent = currency.format(unitPrice * quantity);
-  };
-
-  // --- Sodas: cantidad, tamaño, sabores y reparto por sabor -------------
+  // --- Sodas: cantidad, tamaño, sabores y reparto por sabor ----------------
   const sodaQty = document.querySelector("#refresco-cantidad");
   const sodaSize = document.querySelector("#refresco-tamano");
   const sodaFlavors = document.querySelector("#refrescos");
+  const sodaNote = document.querySelector("#soda-note");
   const sodaCount = document.querySelector("#soda-count");
   const sodaHelpText = document.querySelector("#soda-help-text");
   const sodaSplit = document.querySelector("#soda-split");
   const sodaSplitTotal = document.querySelector("#soda-split-total");
   const sodaDetails = document.querySelectorAll(".soda-detail:not(#soda-split)");
   const splitRows = [...document.querySelectorAll(".soda-split__row")];
-  const summarySodas = document.querySelector("#summary-sodas");
-  let flavorsTouched = sodaFlavors?.selectedOptions.length > 0;
+  let flavorsTouched = sodaFlavors.selectedOptions.length > 0;
+  let sodaQtyTouched = false;
 
   const sodaTotal = () =>
     Math.min(Number(sodaQty.max), Math.max(0, Number.parseInt(sodaQty.value, 10) || 0));
   const chosenFlavors = () => [...sodaFlavors.selectedOptions].map((o) => o.value);
   const splitRow = (flavor) => splitRows.find((row) => row.dataset.sabor === flavor);
+  const splitValue = (flavor) =>
+    Number.parseInt(splitRow(flavor).querySelector("input").value, 10) || 0;
+
+  // Precio de las sodas: cada combo incluye una lata (se paga la diferencia
+  // si el tamaño es mayor y las sodas extra completas); en pizzas se cobran todas.
+  const sodasPrice = () => {
+    const total = sodaTotal();
+    if (!total) return 0;
+    const price = Number(sodaSize.selectedOptions[0]?.dataset.price ?? 0);
+    if (!isCombo()) return total * price;
+    const included = Math.min(total, quantity());
+    const difference = price - Number(sodaNote.dataset.incluida);
+    return included * difference + (total - included) * price;
+  };
 
   // Reparte las sodas en partes casi iguales entre los sabores elegidos.
   const distribute = () => {
@@ -88,34 +68,43 @@ if (pizzaSelect && quantityInput && deliverySelect) {
     });
   };
 
-  const sodaPicker = document.querySelector("#soda-picker");
-  // Los combos de una y de dos pizzas incluyen sodas; las pizzas individuales no.
-  const isCombo = () => (pizzaSelect.selectedOptions[0]?.dataset.tipo ?? "PIZZA") !== "PIZZA";
+  // Sugiere el sabor del combo mientras el cliente no haya elegido otro.
+  const suggestComboFlavor = () => {
+    if (flavorsTouched || sodaTotal() === 0) return;
+    const comboFlavor = selectedProduct()?.dataset.refresco;
+    [...sodaFlavors.options].forEach((o) => { o.selected = o.value === comboFlavor; });
+  };
+
+  // Por defecto: una soda por combo y ninguna con las pizzas individuales.
+  const defaultSodaQty = () => {
+    if (sodaQtyTouched) return;
+    sodaQty.value = isCombo() ? quantity() : 0;
+  };
+
+  const sodaSummary = () => {
+    const total = sodaTotal();
+    const flavors = chosenFlavors();
+    if (!total || !flavors.length) return "Ninguna";
+    const size = sodaSize.selectedOptions[0]?.textContent.split(" — ")[0].trim() ?? "";
+    const parts = flavors.length === 1
+      ? [`${total}× ${flavors[0]}`]
+      : flavors.map((f) => `${splitValue(f)}× ${f}`);
+    return `${parts.join(", ")} (${size})`;
+  };
 
   const updateSodas = () => {
-    // Solo los combos incluyen sodas: con una pizza individual la sección se
-    // oculta y se desactiva (sus campos no se envían ni se validan).
-    const combo = isCombo();
-    sodaPicker.hidden = !combo;
-    sodaPicker.disabled = !combo;
-    if (!combo) {
-      summarySodas.textContent = "No incluye (pizza individual)";
-      return;
-    }
-
     const total = sodaTotal();
     const hasSoda = total > 0;
+    sodaNote.hidden = !isCombo();
     sodaDetails.forEach((el) => { el.hidden = !hasSoda; });
     sodaSize.disabled = !hasSoda;
     sodaFlavors.disabled = !hasSoda;
 
     // No puede haber más sabores que sodas: se quitan los últimos elegidos.
-    const selected = [...sodaFlavors.selectedOptions];
-    selected.slice(Math.max(total, 0)).forEach((o) => { o.selected = false; });
+    [...sodaFlavors.selectedOptions].slice(total).forEach((o) => { o.selected = false; });
 
     const flavors = chosenFlavors();
-    const maxFlavors = Math.max(total, 1);
-    sodaCount.textContent = `${flavors.length} / ${maxFlavors}`;
+    sodaCount.textContent = `${flavors.length} / ${Math.max(total, 1)}`;
     sodaCount.classList.toggle("is-ok", flavors.length >= 1);
     sodaHelpText.textContent =
       total > 1
@@ -131,20 +120,9 @@ if (pizzaSelect && quantityInput && deliverySelect) {
       row.hidden = !active;
       row.querySelector("input").disabled = !active;
     });
-
-    let summary = "Ninguna";
-    if (hasSoda && flavors.length) {
-      const size = sodaSize.selectedOptions[0]?.textContent.trim() ?? "";
-      const parts = flavors.length === 1
-        ? [`${total}× ${flavors[0]}`]
-        : flavors.map((f) => `${splitRow(f).querySelector("input").value}× ${f}`);
-      summary = `${parts.join(", ")} · ${size}`;
-    }
-    summarySodas.textContent = summary;
-
     if (showSplit) {
       const inputs = flavors.map((f) => splitRow(f).querySelector("input"));
-      const sum = inputs.reduce((acc, input) => acc + (Number.parseInt(input.value, 10) || 0), 0);
+      const sum = flavors.reduce((acc, f) => acc + splitValue(f), 0);
       sodaSplitTotal.textContent = `Total ${sum} / ${total}`;
       sodaSplitTotal.classList.toggle("is-ok", sum === total);
       inputs.at(-1).setCustomValidity(
@@ -153,48 +131,115 @@ if (pizzaSelect && quantityInput && deliverySelect) {
     }
   };
 
-  // Si el cliente aún no eligió sabor, se sugiere el refresco del combo.
-  const suggestComboFlavor = () => {
-    if (flavorsTouched || sodaTotal() === 0) return;
-    const comboFlavor = pizzaSelect.selectedOptions[0]?.dataset.refresco;
-    [...sodaFlavors.options].forEach((o) => { o.selected = o.value === comboFlavor; });
+  // --- Vista previa del producto que se va a agregar -----------------------
+  const summaryPizza = document.querySelector("#summary-pizza");
+  const summaryUnit = document.querySelector("#summary-unit");
+  const summaryQuantity = document.querySelector("#summary-quantity");
+  const summarySodas = document.querySelector("#summary-sodas");
+  const summarySodasPrice = document.querySelector("#summary-sodas-price");
+  const summaryTotal = document.querySelector("#summary-total");
+
+  const updatePreview = () => {
+    const option = selectedProduct();
+    const unitPrice = Number(option?.dataset.price ?? 0);
+    const sodas = sodasPrice();
+    summaryPizza.textContent = option?.textContent.split(" — ")[0].trim() ?? "—";
+    summaryUnit.textContent = money(unitPrice);
+    summaryQuantity.textContent = String(quantity());
+    summarySodas.textContent = sodaSummary();
+    summarySodasPrice.textContent = money(sodas);
+    summaryTotal.textContent = money(unitPrice * quantity() + sodas);
   };
 
-  if (sodaQty && sodaFlavors) {
-    window.enableClickSelect(sodaFlavors, {
-      getMax: () => Math.max(sodaTotal(), 1),
-      onLimit: () => window.shakeCounter(sodaCount),
+  // --- Paso 2: entrega -----------------------------------------------------
+  const deliverySelect = document.querySelector("#entrega");
+  const deliveryHelp = document.querySelector("#entrega-help");
+  const addressField = document.querySelector("#direccion-field");
+  const addressInput = document.querySelector("#direccion");
+  const cartItems = Number(document.querySelector("#tu-pedido")?.dataset.items ?? 0);
+
+  // La entrega se limita según los productos del pedido (o, si aún está
+  // vacío, según el producto elegido, que es el que se confirmaría).
+  const applyDelivery = () => {
+    const allowed = cartItems
+      ? deliverySelect.dataset.carrito || "AMBOS"
+      : selectedProduct()?.dataset.entrega ?? "AMBOS";
+    [...deliverySelect.options].forEach((option) => {
+      option.disabled = allowed !== "AMBOS" && option.value !== allowed;
     });
-    sodaFlavors.addEventListener("change", () => {
-      flavorsTouched = true;
-      distribute();
-      updateSodas();
-    });
-    sodaQty.addEventListener("input", () => {
-      suggestComboFlavor();
-      distribute();
-      updateSodas();
-    });
-    sodaSize.addEventListener("change", updateSodas);
-    splitRows.forEach((row) => row.querySelector("input").addEventListener("input", updateSodas));
+    if (deliverySelect.selectedOptions[0]?.disabled) deliverySelect.value = allowed;
+    deliveryHelp.hidden = allowed === "AMBOS";
+    deliveryHelp.textContent =
+      allowed === "FLETE A DOMICILIO"
+        ? "Este pedido solo se entrega a domicilio."
+        : "Este pedido solo está disponible para retiro en sitio.";
+
+    // La dirección solo se pide (y es obligatoria) cuando el pedido va a domicilio.
+    const isDelivery = deliverySelect.value === "FLETE A DOMICILIO";
+    addressField.hidden = !isDelivery;
+    addressInput.required = isDelivery;
+    addressInput.disabled = !isDelivery;
+  };
+
+  // --- Eventos ------------------------------------------------------------
+  const refreshAll = () => {
+    applyCategory();
+    defaultSodaQty();
     suggestComboFlavor();
     updateSodas();
-  }
+    updatePreview();
+    applyDelivery();
+  };
 
-  pizzaSelect.addEventListener("change", () => {
-    applyPizzaDelivery();
-    if (sodaFlavors) {
-      suggestComboFlavor();
-      updateSodas();
-    }
-    updateSummary();
+  window.enableClickSelect(sodaFlavors, {
+    getMax: () => Math.max(sodaTotal(), 1),
+    onLimit: () => window.shakeCounter(sodaCount),
   });
-  quantityInput.addEventListener("input", updateSummary);
+  categoryRadios.forEach((radio) => radio.addEventListener("change", () => {
+    flavorsTouched = false;
+    refreshAll();
+  }));
+  productChoices.forEach((choice) =>
+    choice.querySelector("select").addEventListener("change", refreshAll)
+  );
+  quantityInput.addEventListener("input", () => {
+    defaultSodaQty();
+    distribute();
+    updateSodas();
+    updatePreview();
+  });
+  sodaQty.addEventListener("input", () => {
+    sodaQtyTouched = true;
+    suggestComboFlavor();
+    distribute();
+    updateSodas();
+    updatePreview();
+  });
+  sodaFlavors.addEventListener("change", () => {
+    flavorsTouched = true;
+    distribute();
+    updateSodas();
+    updatePreview();
+  });
+  sodaSize.addEventListener("change", () => { updateSodas(); updatePreview(); });
+  splitRows.forEach((row) =>
+    row.querySelector("input").addEventListener("input", () => { updateSodas(); updatePreview(); })
+  );
   deliverySelect.addEventListener("change", () => {
-    updateSummary();
-    if (deliverySelect.value === "FLETE A DOMICILIO") addressInput?.focus();
+    applyDelivery();
+    if (deliverySelect.value === "FLETE A DOMICILIO") addressInput.focus();
   });
-  addressInput?.addEventListener("input", updateSummary);
-  applyPizzaDelivery();
-  updateSummary();
+
+  // Al confirmar un pedido que ya tiene productos, el paso 1 no se envía
+  // (ni se valida): solo cuentan los productos de «Tu pedido».
+  document.querySelector("#confirmar-pedido").addEventListener("click", () => {
+    if (!cartItems) return;
+    const itemFields = document.querySelector("#item-fields");
+    itemFields.disabled = true;
+    // Si el navegador bloquea el envío (p. ej. falta el nombre), se reactiva.
+    setTimeout(() => { itemFields.disabled = false; }, 0);
+  });
+
+  sodaQtyTouched = sodaQty.value !== String(isCombo() ? quantity() : 0);
+  refreshAll();
 }

@@ -4,7 +4,7 @@
 <div class="page-heading">
   <p class="eyebrow">Cobro Yappy · Pedido #{{ pedido.id }}</p>
   <h1>{% if cobro.estado == 'PAGADO' %}Pago recibido{% else %}Esperando el pago{% endif %}</h1>
-  <p>{{ pedido.cliente }} · {{ pedido.cantidad }} × {{ pedido.pizza_nombre }} · {{ pedido.retiro_o_flete }}</p>
+  <p>{{ pedido.cliente }} · {{ pedido.pizza_nombre }} · {{ pedido.retiro_o_flete }}</p>
 </div>
 
 <div id="pago-confirmado" class="payment-success" {% if cobro.estado != 'PAGADO' %}hidden{% endif %}

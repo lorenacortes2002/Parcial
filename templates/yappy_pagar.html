@@ -22,7 +22,7 @@
       <p class="checkout-amount">${{ "%.2f"|format(cobro.monto) }}</p>
       <dl class="payment-data">
         <div><dt>Cliente</dt><dd>{{ pedido.cliente }}</dd></div>
-        <div><dt>Detalle</dt><dd>{{ pedido.cantidad }} × {{ pedido.pizza_nombre }}</dd></div>
+        <div><dt>Detalle</dt><dd>{{ pedido.pizza_nombre }}</dd></div>
         <div><dt>Código</dt><dd><code>{{ cobro.codigo }}</code></dd></div>
       </dl>
       <form method="POST">

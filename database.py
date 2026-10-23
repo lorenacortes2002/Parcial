@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS pedidos (
     retiro_o_flete TEXT NOT NULL DEFAULT 'RETIRO EN SITIO',
     direccion TEXT,                             -- obligatoria solo si es FLETE A DOMICILIO
     fecha TEXT NOT NULL,
+    detalle TEXT,                               -- resumen: "2× Combo Hawaiana, 1× Pizza Margarita"
     FOREIGN KEY (pizza_id) REFERENCES pizzas(id)
 );
 
@@ -61,6 +62,22 @@ CREATE TABLE IF NOT EXISTS pagos (
     estado TEXT NOT NULL DEFAULT 'CONFIRMADO',
     fecha TEXT NOT NULL,
     FOREIGN KEY (pedido_id) REFERENCES pedidos(id)
+);
+
+-- Productos de cada pedido (un pedido puede tener varios combos y pizzas).
+CREATE TABLE IF NOT EXISTS pedido_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pedido_id INTEGER NOT NULL,
+    pizza_id INTEGER NOT NULL,
+    cantidad INTEGER NOT NULL,
+    precio_unitario REAL NOT NULL,
+    sodas TEXT NOT NULL DEFAULT 'Ninguno',      -- p. ej. "2× Coca-Cola (Lata 12 oz)"
+    sodas_cantidad INTEGER NOT NULL DEFAULT 0,
+    sodas_tamano TEXT,
+    precio_sodas REAL NOT NULL DEFAULT 0,
+    subtotal REAL NOT NULL,
+    FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE CASCADE,
+    FOREIGN KEY (pizza_id) REFERENCES pizzas(id)
 );
 
 -- Cobros Yappy generados (QR / número) a la espera de que el cliente pague.
@@ -89,6 +106,8 @@ def _migrate(conn):
         )
     if "refresco_tamano" not in columnas:
         conn.execute("ALTER TABLE pedidos ADD COLUMN refresco_tamano TEXT")
+    if "detalle" not in columnas:
+        conn.execute("ALTER TABLE pedidos ADD COLUMN detalle TEXT")
     columnas = {row["name"] for row in conn.execute("PRAGMA table_info(pizzas)")}
     if "entrega" not in columnas:
         conn.execute("ALTER TABLE pizzas ADD COLUMN entrega TEXT NOT NULL DEFAULT 'AMBOS'")
