@@ -13,21 +13,28 @@
 
   <div class="form-card">
     <fieldset id="item-fields" class="item-fields">
-      <p class="eyebrow">Paso 1</p>
-      <h2 class="step-title">Elige qué quieres</h2>
+      <div class="step-header">
+        <span class="step-number" aria-hidden="true">1</span>
+        <div>
+          <h2>Elige qué quieres</h2>
+          <p>Escoge un combo o una pizza, la cantidad y tus sodas.</p>
+        </div>
+      </div>
 
       <div class="type-options type-options--two" role="radiogroup" aria-label="Tipo de producto">
         <label class="type-option">
           <input type="radio" name="categoria" value="COMBO" {% if categoria == 'COMBO' %}checked{% endif %}>
+          <span class="type-option__icon" aria-hidden="true">🍕🥤</span>
           <span><strong>Combos</strong><small>Incluyen una lata por combo</small></span>
         </label>
         <label class="type-option">
           <input type="radio" name="categoria" value="PIZZA" {% if categoria == 'PIZZA' %}checked{% endif %}>
+          <span class="type-option__icon" aria-hidden="true">🍕</span>
           <span><strong>Pizzas individuales</strong><small>Solo la pizza; agrega sodas si quieres</small></span>
         </label>
       </div>
 
-      <div class="form-grid">
+      <div class="product-row">
         <div class="form-field product-choice" data-categoria="COMBO" {% if categoria != 'COMBO' %}hidden{% endif %}>
           <label for="pizza-id">Combo</label>
           <select id="pizza-id" name="pizza_id" class="product-select" {% if categoria != 'COMBO' %}disabled{% endif %}>
@@ -62,12 +69,13 @@
           <input id="cantidad" type="number" name="cantidad" min="1" max="{{ max_cantidad }}"
             value="{{ form.get('cantidad', 1) }}" required>
         </div>
+      </div>
 
-        <fieldset class="form-field form-field--full soda-picker" id="soda-picker">
-          <legend>Sodas</legend>
+        <fieldset class="soda-picker" id="soda-picker">
+          <legend>🥤 Sodas</legend>
           <p id="soda-note" class="soda-note"
             data-incluida="{{ precios_soda[tamano_incluido] }}">Cada combo incluye una lata de 12 oz. Con un tamaño mayor pagas solo la diferencia; las sodas extra se cobran completas.</p>
-          <div class="form-grid">
+          <div class="soda-grid">
             <div class="form-field">
               <label for="refresco-cantidad">Cantidad de sodas</label>
               <input id="refresco-cantidad" type="number" name="refresco_cantidad"
@@ -112,26 +120,32 @@
             </div>
           </div>
         </fieldset>
-      </div>
 
-      <div class="item-preview" aria-live="polite">
-        <span>Este producto: <strong id="summary-pizza">—</strong></span>
-        <span>Pizzas <strong id="summary-unit">$0.00</strong> × <strong id="summary-quantity">1</strong></span>
-        <span>Sodas <strong id="summary-sodas">Ninguna</strong> · <strong id="summary-sodas-price">$0.00</strong></span>
-        <span class="item-preview__total">Subtotal <strong id="summary-total">$0.00</strong></span>
-      </div>
-
-      <div class="form-actions">
-        <button type="submit" class="btn" formaction="{{ url_for('pedidos_agregar') }}" formnovalidate>
-          + Agregar al pedido
-        </button>
+      <div class="item-footer">
+        <dl class="item-preview" aria-live="polite">
+          <div><dt>Producto</dt><dd id="summary-pizza">—</dd></div>
+          <div><dt>Pizzas</dt><dd><span id="summary-unit">$0.00</span> × <span id="summary-quantity">1</span></dd></div>
+          <div><dt>Sodas</dt><dd><span id="summary-sodas">Ninguna</span> · <span id="summary-sodas-price">$0.00</span></dd></div>
+        </dl>
+        <div class="item-footer__action">
+          <span class="item-footer__label">Subtotal</span>
+          <strong id="summary-total" class="item-footer__total">$0.00</strong>
+          <button type="submit" class="btn" formaction="{{ url_for('pedidos_agregar') }}" formnovalidate>
+            + Agregar al pedido
+          </button>
+        </div>
       </div>
     </fieldset>
   </div>
 
   <div class="form-card">
-    <p class="eyebrow">Paso 2</p>
-    <h2 class="step-title">Tus datos y la entrega</h2>
+    <div class="step-header">
+      <span class="step-number" aria-hidden="true">2</span>
+      <div>
+        <h2>Tus datos y la entrega</h2>
+        <p>Te enviaremos la confirmación por correo cuando pagues.</p>
+      </div>
+    </div>
     <div class="form-grid">
       <div class="form-field">
         <label for="cliente">Nombre del cliente</label>
@@ -163,8 +177,8 @@
         <small id="direccion-help">Incluye barrio, calle, número de casa o apartamento y un punto de referencia.</small>
       </div>
     </div>
-    <div class="form-actions">
-      <button type="submit" class="btn" id="confirmar-pedido">Confirmar pedido</button>
+    <div class="form-actions confirm-actions">
+      <button type="submit" class="btn btn-large" id="confirmar-pedido">Confirmar pedido</button>
     </div>
     <p class="summary-footnote">
       {% if carrito %}Se confirmarán los productos de «Tu pedido».{% else %}Si no agregas nada, se confirmará el producto elegido en el paso 1.{% endif %}
@@ -175,8 +189,10 @@
 
 <aside class="order-summary" id="tu-pedido" aria-labelledby="order-summary-title"
   data-items="{{ carrito|length }}">
-  <p class="eyebrow">Tu selección</p>
-  <h2 id="order-summary-title">Tu pedido</h2>
+  <div class="cart-header">
+    <h2 id="order-summary-title">Tu pedido</h2>
+    <span class="cart-count">{{ carrito|length }} {{ 'producto' if carrito|length == 1 else 'productos' }}</span>
+  </div>
   {% if carrito %}
     <ul class="cart-list">
       {% for linea in carrito %}
@@ -185,10 +201,12 @@
             <strong>{{ linea.cantidad }}× {{ linea.nombre }}</strong>
             <span>${{ "%.2f"|format(linea.subtotal) }}</span>
           </div>
-          <small>Pizzas ${{ "%.2f"|format(linea.precio_pizzas) }} · Sodas: {{ linea.sodas }}
-            {% if linea.sodas_cantidad %}(${{ "%.2f"|format(linea.precio_sodas) }}){% endif %}</small>
-          <button type="submit" class="link-danger cart-line__remove"
-            formaction="{{ url_for('pedidos_quitar', indice=loop.index0) }}" formnovalidate>Quitar</button>
+          <small>🍕 Pizzas ${{ "%.2f"|format(linea.precio_pizzas) }}</small>
+          <small>🥤 {{ linea.sodas if linea.sodas_cantidad else 'Sin sodas' }}
+            {% if linea.sodas_cantidad %}· ${{ "%.2f"|format(linea.precio_sodas) }}{% endif %}</small>
+          <button type="submit" class="cart-line__remove"
+            formaction="{{ url_for('pedidos_quitar', indice=loop.index0) }}" formnovalidate
+            aria-label="Quitar {{ linea.nombre }}">Quitar</button>
         </li>
       {% endfor %}
     </ul>

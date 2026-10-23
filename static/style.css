@@ -284,47 +284,6 @@ main.container { animation: content-enter .55s cubic-bezier(.2, .7, .25, 1) both
 .duo-parts strong { color: var(--ink); }
 .menu-subtitle { margin: 40px 0 16px; font-size: 1.35rem; }
 
-/* --- Pedido con varios productos (carrito) --------------------------- */
-.order-steps { display: flex; min-width: 0; flex-direction: column; gap: 22px; }
-.order-form { max-width: none; }
-.step-title { margin: 0 0 18px; font-size: 1.45rem; }
-.item-fields { min-width: 0; margin: 0; padding: 0; border: 0; }
-.item-fields .type-options { margin-bottom: 18px; }
-.type-options--two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.product-choice[hidden] { display: none; }
-.soda-note { margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; color: #536357; background: #f1f4ee; font-size: .84rem; }
-.soda-note[hidden] { display: none; }
-.item-preview {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 18px;
-  margin-top: 18px;
-  padding: 14px 16px;
-  border: 1px dashed #cfd8cc;
-  border-radius: 12px;
-  color: var(--muted);
-  background: #fbfcf9;
-  font-size: .86rem;
-}
-.item-preview strong { color: var(--ink); }
-.item-preview__total { margin-left: auto; }
-.item-preview__total strong { color: var(--green); font-size: 1.05rem; }
-.cart-list { display: flex; flex-direction: column; gap: 10px; margin: 0 0 6px; padding: 0; list-style: none; }
-.cart-line {
-  position: relative;
-  padding: 12px 14px;
-  border: 1px solid #d8e1d8;
-  border-radius: 12px;
-  background: #fff;
-  animation: content-enter .3s ease-out both;
-}
-.cart-line__head { display: flex; justify-content: space-between; gap: 10px; font-size: .9rem; }
-.cart-line__head span { color: var(--green); font-weight: 700; white-space: nowrap; }
-.cart-line small { display: block; margin-top: 4px; color: var(--muted); font-size: .78rem; line-height: 1.45; }
-.cart-line__remove { margin-top: 6px; font-size: .8rem; }
-.cart-empty { margin: 0; padding: 16px; border: 1px dashed #cdd8cc; border-radius: 12px; color: var(--muted); background: #f7faf5; font-size: .88rem; }
-.menu-section + .menu-section { margin-top: 56px; }
-
 /* --- Tipo de producto en la Fábrica ---------------------------------- */
 .type-picker { margin: 0 0 6px; padding: 0; border: 0; }
 .type-picker legend { margin-bottom: 10px; padding: 0; color: #373b34; font-size: .9rem; font-weight: 700; }
@@ -477,6 +436,121 @@ main.container { animation: content-enter .55s cubic-bezier(.2, .7, .25, 1) both
 .alert-warning { border-color: #eadbb4; color: #745c23; background: #fbf5e4; }
 .empty-state { padding: 28px; border: 1px dashed #d9d2c5; border-radius: 14px; color: var(--muted); background: #fdfbf7; text-align: center; }
 .empty-state p { margin: 0 0 13px; }
+
+/* --- Página de pedidos (carrito) ---------------------------------------
+   Va después de las reglas generales de .form y .type-options para poder
+   ajustarlas en esta página. */
+.order-form { display: block; max-width: none; }
+.order-form .order-layout { grid-template-columns: minmax(0, 1fr) minmax(300px, 360px); gap: 28px; }
+.order-steps { display: flex; min-width: 0; flex-direction: column; gap: 24px; }
+.order-form .form-card { padding: clamp(22px, 3vw, 34px); }
+.order-form .form-field { gap: 6px; }
+.order-form .form-field > label { margin-top: 0; }
+.order-form small { line-height: 1.45; }
+
+.step-header { display: flex; align-items: center; gap: 14px; margin: 0 0 24px; }
+.step-number {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--green);
+  font-weight: 700;
+}
+.step-header h2 { margin: 0; font-size: 1.4rem; line-height: 1.2; }
+.step-header p { margin: 3px 0 0; color: var(--muted); font-size: .86rem; }
+
+.item-fields { min-width: 0; margin: 0; padding: 0; border: 0; }
+.order-form .type-options { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0 0 22px; }
+.order-form .type-option { align-items: center; gap: 12px; padding: 14px 16px; }
+.order-form .type-option input { margin: 0; }
+.type-option__icon { font-size: 1.35rem; line-height: 1; }
+.order-form .type-option strong { font-size: .95rem; }
+.order-form .type-option small { font-size: .78rem; }
+
+.product-row { display: grid; grid-template-columns: minmax(0, 1fr) 130px; gap: 16px 20px; margin-bottom: 22px; }
+.product-choice[hidden] { display: none; }
+
+.order-form .soda-picker { margin: 0; padding: 18px 20px 20px; }
+.order-form .soda-picker legend { font-size: 1rem; }
+.soda-note { margin: 0 0 16px; padding: 10px 14px; border-left: 3px solid var(--gold); border-radius: 8px; color: #5c5a4c; background: #fbf5e4; font-size: .82rem; }
+.soda-note[hidden] { display: none; }
+.soda-grid { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 16px 20px; }
+.soda-grid .form-field--full { grid-column: 1 / -1; }
+.order-form #refrescos { min-height: 0; }
+
+.item-footer {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+.item-preview { display: grid; min-width: 0; gap: 4px; margin: 0; font-size: .85rem; }
+.item-preview div { display: flex; gap: 8px; }
+.item-preview dt { width: 70px; flex: 0 0 auto; color: var(--muted); }
+.item-preview dd { min-width: 0; margin: 0; font-weight: 600; }
+.item-footer__action { display: flex; flex: 0 0 auto; flex-direction: column; align-items: flex-end; gap: 6px; }
+.item-footer__label { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; }
+.item-footer__total { color: var(--green); font-size: 1.6rem; line-height: 1; }
+.item-footer__action .btn { margin-top: 6px; }
+
+.confirm-actions { margin-top: 24px; }
+.btn-large { min-height: 50px; padding: 12px 28px; font-size: 1rem; }
+
+/* Carrito */
+.order-form .order-summary { top: 20px; padding: 24px; }
+.cart-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.cart-header h2 { margin: 0; font-size: 1.45rem; }
+.cart-count { padding: 3px 10px; border-radius: 999px; color: var(--green); background: #dfe9dd; font-size: .75rem; font-weight: 700; white-space: nowrap; }
+.cart-list { display: flex; flex-direction: column; gap: 10px; margin: 0 0 16px; padding: 0; list-style: none; }
+.cart-line {
+  display: grid;
+  gap: 3px;
+  padding: 14px 16px;
+  border: 1px solid #d8e1d8;
+  border-radius: 14px;
+  background: #fff;
+  animation: content-enter .3s ease-out both;
+}
+.cart-line__head { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 4px; font-size: .92rem; line-height: 1.35; }
+.cart-line__head span { color: var(--green); font-weight: 700; white-space: nowrap; }
+.cart-line small { color: var(--muted); font-size: .78rem; line-height: 1.45; }
+.cart-line__remove {
+  justify-self: start;
+  margin-top: 8px;
+  padding: 4px 12px;
+  border: 1px solid #ecd3cd;
+  border-radius: 999px;
+  color: #a84636;
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: .76rem;
+  font-weight: 700;
+  transition: background-color .2s ease, border-color .2s ease;
+}
+.cart-line__remove:hover { border-color: #a84636; background: #fbefed; }
+.order-form .summary-total { padding-top: 16px; border-top: 1px solid #d3ddd2; }
+.cart-empty { margin: 0 0 4px; padding: 22px 18px; border: 1px dashed #c9d6c7; border-radius: 14px; color: var(--muted); background: #f7faf5; font-size: .88rem; text-align: center; }
+.cart-empty::before { display: block; margin-bottom: 6px; content: "🛒"; font-size: 1.6rem; }
+
+@media (max-width: 900px) {
+  .order-form .order-layout { grid-template-columns: 1fr; }
+  .order-form .order-summary { position: static; }
+}
+
+@media (max-width: 560px) {
+  .order-form .type-options, .product-row, .soda-grid { grid-template-columns: 1fr; }
+  .item-footer { align-items: stretch; flex-direction: column; }
+  .item-footer__action { align-items: stretch; }
+  .item-footer__total { text-align: right; }
+}
 
 /* --- Dirección de entrega -------------------------------------------- */
 .form-field--full { grid-column: 1 / -1; }
