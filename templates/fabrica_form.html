@@ -1,16 +1,31 @@
 {% extends "base.html" %}
-{% block title %}{{ 'Editar' if pizza else 'Nueva' }} pizza · CHINOS CAFÉ{% endblock %}
+{% block title %}{{ 'Editar' if pizza and pizza.id else 'Nuevo' }} producto · CHINOS CAFÉ{% endblock %}
 {% block content %}
 <div class="page-heading">
   <p class="eyebrow">Administración del menú</p>
-  <h1>{{ 'Editar pizza' if pizza else 'Crear una pizza' }}</h1>
-  <p>Define los ingredientes, el acompañamiento y el precio del combo.</p>
+  <h1>{{ 'Editar producto' if pizza and pizza.id else 'Crear un producto' }}</h1>
+  <p>Elige si es un combo (pizza + soda) o una pizza individual, y define sus ingredientes y precio.</p>
 </div>
 
 <div class="form-card">
 <form method="POST" class="form">
-  <label for="nombre">Nombre de la pizza</label>
-  <input id="nombre" type="text" name="nombre" required value="{{ pizza.nombre if pizza else '' }}">
+  <fieldset class="type-picker">
+    <legend>¿Qué deseas crear?</legend>
+    <div class="type-options">
+      {% for valor, texto in tipos_producto.items() %}
+        <label class="type-option">
+          <input type="radio" name="tipo" value="{{ valor }}" {% if tipo_actual == valor %}checked{% endif %}>
+          <span>
+            <strong>{{ 'Combo' if valor == 'COMBO' else 'Pizza individual' }}</strong>
+            <small>{{ 'Pizza con soda incluida' if valor == 'COMBO' else 'Solo la pizza, sin soda' }}</small>
+          </span>
+        </label>
+      {% endfor %}
+    </div>
+  </fieldset>
+
+  <label for="nombre">Nombre</label>
+  <input id="nombre" type="text" name="nombre" required value="{{ pizza.nombre if pizza and pizza.nombre else request.form.get('nombre', '') }}">
 
   <label for="ingredientes">Ingredientes (seleccione entre {{ min_ing }} y {{ max_ing }})</label>
   <select id="ingredientes" name="ingredientes" multiple size="8" required
@@ -23,17 +38,19 @@
     {% endfor %}
   </select>
   <small id="ingredient-help" class="ingredient-help">
-    <span>Haz clic en un ingrediente para añadirlo y otra vez para quitarlo (no hace falta Ctrl).</span>
+    <span>Todas las pizzas llevan queso mozzarella. Haz clic en un ingrediente para añadirlo y otra vez para quitarlo.</span>
     <strong id="ingredient-count" class="pick-count">0 / {{ max_ing }}</strong>
   </small>
   <p id="ingredient-summary" class="ingredient-summary" aria-live="polite"></p>
 
-  <label for="refresco">Refresco</label>
-  <select id="refresco" name="refresco">
-    {% for r in refrescos_disponibles %}
-      <option value="{{ r }}" {% if pizza and pizza.refresco == r %}selected{% endif %}>{{ r }}</option>
-    {% endfor %}
-  </select>
+  <div id="combo-soda" class="combo-only">
+    <label for="refresco">Soda incluida en el combo</label>
+    <select id="refresco" name="refresco">
+      {% for r in sabores_soda %}
+        <option value="{{ r }}" {% if pizza and pizza.refresco == r %}selected{% endif %}>{{ r }}</option>
+      {% endfor %}
+    </select>
+  </div>
 
   <label for="entrega">Forma de entrega</label>
   <select id="entrega" name="entrega" aria-describedby="entrega-help">
@@ -41,11 +58,11 @@
       <option value="{{ valor }}" {% if entrega_actual == valor %}selected{% endif %}>{{ texto }}</option>
     {% endfor %}
   </select>
-  <small id="entrega-help">Define si este combo se puede pedir a domicilio, para retirar o de ambas formas.</small>
+  <small id="entrega-help">Define si se puede pedir a domicilio, para retirar o de ambas formas.</small>
 
   <label for="precio">Precio (USD)</label>
   <input id="precio" type="number" step="0.01" min="0.01" name="precio" required
-         value="{{ pizza.precio if pizza else '' }}">
+         value="{{ pizza.precio if pizza and pizza.precio else request.form.get('precio', '') }}">
 
   <div class="form-actions">
     <button type="submit" class="btn">Guardar</button>

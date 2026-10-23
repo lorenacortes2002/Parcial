@@ -26,19 +26,17 @@
   </div>
 </section>
 
-<div class="page-heading">
-  <p class="eyebrow">Nuestro menú</p>
-  <h2>Favoritos de la casa</h2>
-  <p>Combos preparados al momento para disfrutar en cualquier ocasión.</p>
-</div>
-<div class="grid">
-  {% for p in pizzas %}
+{% macro menu_card(p, art) %}
   <article class="card">
-    <div class="pizza-art pizza-art--{{ loop.index0 % 5 }}" aria-hidden="true"></div>
+    <div class="pizza-art pizza-art--{{ art }}" aria-hidden="true"></div>
     <div class="card-body">
       <h3>{{ p.nombre }}</h3>
-      <p class="muted">{{ p.ingredientes.replace(',', ', ') }}</p>
-      <p class="drink">🥤 {{ p.refresco }}</p>
+      <p class="muted">Queso mozzarella, {{ p.ingredientes.replace(',', ', ') }}</p>
+      {% if p.tipo == 'COMBO' %}
+        <p class="drink">🥤 Incluye {{ p.refresco }}</p>
+      {% else %}
+        <p class="drink">🍕 Pizza individual</p>
+      {% endif %}
       <p class="delivery-note">{{ entregas_pizza[p.entrega] }}</p>
       <div class="card-bottom">
         <span class="precio">${{ "%.2f"|format(p.precio) }}</span>
@@ -46,11 +44,41 @@
       </div>
     </div>
   </article>
-  {% else %}
-  <div class="empty-state">
-    <p>Aún estamos preparando el menú.</p>
-    <a href="{{ url_for('fabrica') }}">Ir a Fábrica para agregar pizzas</a>
+{% endmacro %}
+
+<section class="menu-section" id="combos" aria-labelledby="combos-title">
+  <div class="page-heading">
+    <p class="eyebrow">Nuestro menú</p>
+    <h2 id="combos-title">Combos</h2>
+    <p>Pizza recién horneada con soda incluida, lista para compartir.</p>
   </div>
-  {% endfor %}
-</div>
+  <div class="grid">
+    {% for p in combos %}
+      {{ menu_card(p, loop.index0 % 5) }}
+    {% else %}
+    <div class="empty-state">
+      <p>Aún estamos preparando los combos.</p>
+      <a href="{{ url_for('fabrica') }}">Ir a Fábrica para agregar combos</a>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="menu-section" id="pizzas" aria-labelledby="pizzas-title">
+  <div class="page-heading">
+    <p class="eyebrow">Solo pizza</p>
+    <h2 id="pizzas-title">Pizzas individuales</h2>
+    <p>Tu pizza favorita, sin soda, para cuando solo se te antoja pizza.</p>
+  </div>
+  <div class="grid">
+    {% for p in individuales %}
+      {{ menu_card(p, (loop.index0 + 2) % 5) }}
+    {% else %}
+    <div class="empty-state">
+      <p>Pronto tendremos pizzas individuales.</p>
+      <a href="{{ url_for('fabrica_nueva', tipo='PIZZA') }}">Ir a Fábrica para agregar pizzas</a>
+    </div>
+    {% endfor %}
+  </div>
+</section>
 {% endblock %}

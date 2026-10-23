@@ -62,6 +62,7 @@ class ProjectRequirementsTests(unittest.TestCase):
         )
 
     def test_crud_validates_fields_and_keeps_catalog_replicated(self):
+        initial_count = self._rows(self.local_path, "SELECT COUNT(*) FROM pizzas")[0][0]
         invalid = self.client.post(
             "/fabrica/nueva",
             data={
@@ -75,7 +76,7 @@ class ProjectRequirementsTests(unittest.TestCase):
 
         for path in (self.local_path, self.replica_path):
             self.assertEqual(
-                self._rows(path, "SELECT COUNT(*) FROM pizzas")[0][0], 5
+                self._rows(path, "SELECT COUNT(*) FROM pizzas")[0][0], initial_count
             )
 
         created = self.client.post(
@@ -107,7 +108,7 @@ class ProjectRequirementsTests(unittest.TestCase):
             f"/fabrica/editar/{pizza_id}",
             data={
                 "nombre": "Pizza editada",
-                "ingredientes": ["queso mozzarella", "chorizo"],
+                "ingredientes": ["chorizo"],
                 "refresco": "Agua",
                 "precio": "10.00",
             },
@@ -125,7 +126,7 @@ class ProjectRequirementsTests(unittest.TestCase):
         self.assertEqual(deleted.status_code, 302)
         for path in (self.local_path, self.replica_path):
             self.assertEqual(
-                self._rows(path, "SELECT COUNT(*) FROM pizzas")[0][0], 5
+                self._rows(path, "SELECT COUNT(*) FROM pizzas")[0][0], initial_count
             )
             self.assertEqual(
                 self._rows(path, "SELECT id FROM pizzas WHERE id=?", (pizza_id,)), []
@@ -151,7 +152,8 @@ class ProjectRequirementsTests(unittest.TestCase):
             follow_redirects=True,
         )
         self.assertIn(b"Pedido #", response.data)
-        self.assertEqual(self.mail_mock.call_count, 2)
+        # El JSON solo se envía por correo después del pago.
+        self.assertEqual(self.mail_mock.call_count, 0)
 
         order = self._rows(
             self.local_path,
@@ -204,7 +206,11 @@ class ProjectRequirementsTests(unittest.TestCase):
         # 2) El cliente escanea el QR y paga; recibe la confirmación.
         payment = self.client.post(f"/yappy/pagar/{codigo}", follow_redirects=True)
         self.assertIn("¡Pago realizado!".encode(), payment.data)
-        self.assertEqual(self.mail_mock.call_count, 4)
+        self.assertEqual(self.mail_mock.call_count, 2)
+        sent_json = self.mail_mock.call_args.args[2]
+        self.assertEqual(sent_json["tipo"], "CONFIRMACION_PAGO")
+        self.assertEqual(sent_json["pedido"]["cantidad"], 2)
+        self.assertEqual(sent_json["direccion"], order[4])
         status = self.client.get(f"/pagos/yappy/{codigo}/estado").get_json()
         self.assertEqual(status["estado"], "PAGADO")
         self.assertTrue(status["referencia"].startswith("YAPPY-"))
@@ -235,7 +241,7 @@ class ProjectRequirementsTests(unittest.TestCase):
         )
         self.assertIn(b"Este pedido ya fue pagado", repeated_manual.data)
         self.client.post(f"/yappy/pagar/{codigo}")
-        self.assertEqual(self.mail_mock.call_count, 4)
+        self.assertEqual(self.mail_mock.call_count, 2)
         self.assertEqual(
             self._rows(self.local_path, "SELECT COUNT(*) FROM pagos")[0][0], 1
         )
@@ -434,6 +440,83 @@ class ProjectRequirementsTests(unittest.TestCase):
             ("Ninguno", 0, None),
         )
 
+    def test_combos_and_individual_pizzas(self):
+        base = {"ingredientes": ["pepperoni"], "precio": "6.00"}
+
+        # Mozzarella ya no es un ingrediente seleccionable; basta 1 ingrediente.
+        form = self.client.get("/fabrica/nueva").get_data(as_text=True)
+        self.assertNotIn('value="queso mozzarella"', form)
+        bad = self.client.post(
+            "/fabrica/nueva",
+            data={**base, "tipo": "PIZZA", "nombre": "Con queso",
+                  "ingredientes": ["queso mozzarella"]},
+        )
+        self.assertIn(b"Seleccione ingredientes v", bad.data)
+        for path in (self.local_path, self.replica_path):
+            self.assertEqual(
+                self._rows(path, "SELECT COUNT(*) FROM pizzas WHERE ',' || ingredientes "
+                                 "|| ',' LIKE '%mozzarella%'")[0][0],
+                0,
+            )
+
+        # Un combo debe incluir soda; una pizza individual la ignora.
+        no_soda = self.client.post(
+            "/fabrica/nueva", data={**base, "tipo": "COMBO", "nombre": "Combo sin soda"}
+        )
+        self.assertIn(b"Seleccione la soda que incluye el combo", no_soda.data)
+        self.client.post(
+            "/fabrica/nueva",
+            data={**base, "tipo": "PIZZA", "nombre": "Solo Pepperoni", "refresco": "Fanta"},
+        )
+        pizza_id, refresco = self._rows(
+            self.replica_path,
+            "SELECT id, refresco FROM pizzas WHERE nombre='Solo Pepperoni' AND tipo='PIZZA'",
+        )[0]
+        self.assertIsNone(refresco)
+
+        menu = self.client.get("/").get_data(as_text=True)
+        self.assertIn("Combos", menu)
+        self.assertIn("Pizzas individuales", menu)
+        self.assertLess(menu.index("Hawaiana"), menu.index("Pizzas individuales"))
+        self.assertGreater(menu.index("<h3>Solo Pepperoni</h3>"), menu.index("Pizzas individuales"))
+
+        # Al pedir una pizza individual no se guardan sodas.
+        self.client.post(
+            "/pedidos",
+            data={
+                "cliente": "Cliente",
+                "correo_cliente": "cliente@example.com",
+                "pizza_id": str(pizza_id),
+                "cantidad": "1",
+                "retiro_o_flete": "RETIRO EN SITIO",
+                "refresco_cantidad": "2",
+                "refresco_tamano": "1 LITRO",
+                "refrescos": ["Sprite"],
+            },
+        )
+        self.assertEqual(
+            self._rows(self.local_path, "SELECT refresco, refresco_cantidad FROM pedidos"),
+            [("Ninguno", 0)],
+        )
+
+        # Las pizzas individuales se pueden borrar; los combos mantienen el mínimo.
+        self.client.post(
+            "/fabrica/nueva", data={**base, "tipo": "PIZZA", "nombre": "Temporal"}
+        )
+        temporal_id = self._rows(
+            self.local_path, "SELECT id FROM pizzas WHERE nombre='Temporal'"
+        )[0][0]
+        self.client.post(f"/fabrica/eliminar/{temporal_id}")
+        for path in (self.local_path, self.replica_path):
+            self.assertEqual(
+                self._rows(path, "SELECT id FROM pizzas WHERE id=?", (temporal_id,)), []
+            )
+        to_pizza = self.client.post(
+            "/fabrica/editar/1",
+            data={**base, "tipo": "PIZZA", "nombre": "Pepperoni Clásica"},
+        )
+        self.assertIn(b"al menos 5 combos", to_pizza.data)
+
     def test_unknown_yappy_code_is_handled(self):
         self.assertEqual(self.client.get("/yappy/pagar/CC-NOPE00").status_code, 404)
         self.assertEqual(
@@ -449,7 +532,7 @@ class ProjectRequirementsTests(unittest.TestCase):
         self.mail.start()
         self.addCleanup(self.mail.stop)
 
-        response = self.client.post(
+        self.client.post(
             "/pedidos",
             data={
                 "cliente": "Cliente",
@@ -461,12 +544,14 @@ class ProjectRequirementsTests(unittest.TestCase):
                 "cantidad": "1",
                 "retiro_o_flete": "RETIRO EN SITIO",
             },
-            follow_redirects=True,
         )
+        charge = self.client.post("/pagos", data={"pedido_id": "1"})
+        codigo = charge.headers["Location"].rsplit("/", 1)[-1]
+        response = self.client.post(f"/yappy/pagar/{codigo}", follow_redirects=True)
         self.assertIn(b"no se pudieron enviar", response.data)
         self.assertNotIn(b"correos de confirmaci", response.data)
         self.assertEqual(
-            self._rows(self.local_path, "SELECT COUNT(*) FROM pedidos")[0][0], 1
+            self._rows(self.local_path, "SELECT COUNT(*) FROM pagos")[0][0], 1
         )
 
     def test_all_application_pages_render(self):

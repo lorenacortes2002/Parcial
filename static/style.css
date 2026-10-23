@@ -276,6 +276,32 @@ main.container { animation: content-enter .55s cubic-bezier(.2, .7, .25, 1) both
 .delivery-note { margin: 0 0 18px; color: var(--green); font-size: .82rem; font-weight: 600; }
 .delivery-note::before { content: "🛵 "; }
 .entrega-badge { color: #2f5a44; background: #e6efe7; }
+.tipo-combo { color: #8a3b22; background: #fbe7dc; }
+.tipo-pizza { color: #5b4a1c; background: #f3ead2; }
+.menu-section + .menu-section { margin-top: 56px; }
+
+/* --- Tipo de producto en la Fábrica ---------------------------------- */
+.type-picker { margin: 0 0 6px; padding: 0; border: 0; }
+.type-picker legend { margin-bottom: 10px; padding: 0; color: #373b34; font-size: .9rem; font-weight: 700; }
+.type-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.form .type-option {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  padding: 14px 16px;
+  border: 1.5px solid #dcd7cc;
+  border-radius: 12px;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color .18s ease, background-color .18s ease, box-shadow .18s ease;
+}
+.form .type-option input { width: auto; min-height: 0; margin: 4px 0 0; accent-color: var(--green); }
+.type-option span { display: flex; flex-direction: column; gap: 2px; }
+.type-option small { color: var(--muted); font-weight: 500; }
+.type-option:has(input:checked) { border-color: var(--green); background: #edf4ee; box-shadow: 0 0 0 3px rgb(36 77 59 / 10%); }
+.catalog-actions { flex-wrap: wrap; }
 .card-bottom { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .precio { color: var(--green); font-size: 1.25rem; font-weight: 700; }
 .muted { color: var(--muted); font-size: .92rem; }
@@ -383,7 +409,8 @@ main.container { animation: content-enter .55s cubic-bezier(.2, .7, .25, 1) both
 .ingredient-summary { min-height: 1.2em; margin: 0; color: var(--green); font-size: .85rem; font-weight: 600; text-transform: capitalize; }
 .soda-picker { margin: 4px 0 0; padding: 18px 18px 20px; border: 1px solid var(--line); border-radius: 14px; background: #fdfbf7; }
 .soda-picker legend { padding: 0 6px; color: #373b34; font-size: .95rem; font-weight: 700; }
-.soda-detail[hidden], .soda-split__row[hidden] { display: none; }
+.soda-picker[hidden], .soda-detail[hidden], .soda-split__row[hidden], .combo-only[hidden] { display: none; }
+.combo-only { display: flex; flex-direction: column; gap: 10px; }
 .soda-split__title { color: #373b34; font-size: .9rem; font-weight: 700; }
 .soda-split__rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
 .form .soda-split__row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0; padding: 6px 6px 6px 12px; border: 1px solid #cfe0d1; border-radius: 10px; background: #edf4ee; font-weight: 600; animation: content-enter .25s ease-out both; }
@@ -528,6 +555,7 @@ footer {
   .order-layout { grid-template-columns: 1fr; }
   .order-summary { position: static; }
   .payment-layout { grid-template-columns: 1fr; }
+  .type-options { grid-template-columns: 1fr; }
   .payment-success { flex-direction: column; gap: 12px; }
   .tabla th, .tabla td { padding: 11px 12px; }
 }

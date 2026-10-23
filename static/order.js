@@ -88,7 +88,20 @@ if (pizzaSelect && quantityInput && deliverySelect) {
     });
   };
 
+  const sodaPicker = document.querySelector("#soda-picker");
+  const isCombo = () => pizzaSelect.selectedOptions[0]?.dataset.tipo === "COMBO";
+
   const updateSodas = () => {
+    // Solo los combos incluyen sodas: con una pizza individual la sección se
+    // oculta y se desactiva (sus campos no se envían ni se validan).
+    const combo = isCombo();
+    sodaPicker.hidden = !combo;
+    sodaPicker.disabled = !combo;
+    if (!combo) {
+      summarySodas.textContent = "No incluye (pizza individual)";
+      return;
+    }
+
     const total = sodaTotal();
     const hasSoda = total > 0;
     sodaDetails.forEach((el) => { el.hidden = !hasSoda; });

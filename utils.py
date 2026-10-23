@@ -84,6 +84,14 @@ def generar_json_pago(pago, pedido):
         "retiro_o_flete": pedido["retiro_o_flete"],
         "direccion": pedido.get("direccion"),
         "fecha": pago["fecha"],
+        "pedido": {
+            "pizza": pedido.get("pizza_nombre"),
+            "cantidad": pedido.get("cantidad"),
+            "sodas": pedido.get("refresco"),
+            "total": pedido.get("total"),
+            "correo_cliente": pedido.get("correo_cliente"),
+            "fecha": pedido.get("fecha"),
+        },
     }
     return data, _guardar_json(data, PAGOS_JSON_DIR, "pago")
 

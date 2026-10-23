@@ -20,16 +20,23 @@
       <input id="correo-cliente" type="email" name="correo_cliente" autocomplete="email" required>
     </div>
     <div class="form-field">
-      <label for="pizza-id">Pizza (combo)</label>
+      <label for="pizza-id">Combo o pizza</label>
       <select id="pizza-id" name="pizza_id" required aria-describedby="pizza-help">
-        {% for p in pizzas %}
-          <option value="{{ p.id }}" data-price="{{ p.precio }}" data-entrega="{{ p.entrega }}" data-refresco="{{ p.refresco }}"
-            {% if p.id == selected_pizza_id %}selected{% endif %}>
-            {{ p.nombre }} — ${{ "%.2f"|format(p.precio) }}
-          </option>
+        {% for tipo, etiqueta in (('COMBO', 'Combos (con soda)'), ('PIZZA', 'Pizzas individuales')) %}
+          {% set grupo = pizzas | selectattr('tipo', 'equalto', tipo) | list %}
+          {% if grupo %}
+          <optgroup label="{{ etiqueta }}">
+            {% for p in grupo %}
+              <option value="{{ p.id }}" data-price="{{ p.precio }}" data-entrega="{{ p.entrega }}" data-tipo="{{ p.tipo }}" data-refresco="{{ p.refresco or '' }}"
+                {% if p.id == selected_pizza_id %}selected{% endif %}>
+                {{ p.nombre }} — ${{ "%.2f"|format(p.precio) }}
+              </option>
+            {% endfor %}
+          </optgroup>
+          {% endif %}
         {% endfor %}
       </select>
-      <small id="pizza-help">Elige uno de nuestros combos recién preparados.</small>
+      <small id="pizza-help">Los combos incluyen soda; las pizzas individuales no.</small>
     </div>
     <div class="form-field">
       <label for="cantidad">Cantidad</label>
@@ -55,7 +62,7 @@
     </div>
 
     <fieldset class="form-field form-field--full soda-picker" id="soda-picker">
-      <legend>Sodas</legend>
+      <legend>Sodas del combo</legend>
       <div class="form-grid">
         <div class="form-field">
           <label for="refresco-cantidad">Cantidad de sodas</label>

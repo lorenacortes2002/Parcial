@@ -29,13 +29,16 @@ python app.py
 ```
 Abrir **http://127.0.0.1:5000**
 
-- `/` → Menú público
+- `/` → Menú público, separado en **Combos** (pizza + soda) y **Pizzas individuales**.
 - Cada botón «Pedir» conserva la pizza elegida y el resumen del pedido actualiza el subtotal en pantalla.
-- `/fabrica` → CRUD de pizzas (crear, editar, eliminar) — mínimo 2 y máximo 10 ingredientes por pizza
-- El catálogo inicia con cinco combos y no permite eliminar si quedan menos de cinco.
-- `/pedidos` → El cliente arma su combo; se guarda en `db_local.sqlite3`, se **replica** en
-  `db_replica.sqlite3`, se genera un JSON en `pedidos_json/` y se intenta enviar por correo
-  (si no hay servidor SMTP configurado, queda registrado en `correos_enviados.log`; el sitio avisa que no se envió).
+- `/fabrica` → CRUD de productos (crear, editar, eliminar). Al crear se elige **Combo** (incluye una soda)
+  o **Pizza individual** (sin soda). Cada pizza lleva de 1 a 10 ingredientes; el queso mozzarella es la
+  base de todas, por eso no aparece en la lista.
+- El catálogo inicia con cinco combos y tres pizzas individuales; no permite eliminar (ni convertir en
+  pizza) un combo si quedarían menos de cinco.
+- `/pedidos` → El cliente elige un combo o una pizza (solo los combos muestran la sección de sodas);
+  se guarda en `db_local.sqlite3`, se **replica** en `db_replica.sqlite3` y se genera un JSON en
+  `pedidos_json/`. El correo **no** se envía todavía: se envía al confirmarse el pago.
   Si se elige **Flete a domicilio** aparece el campo **Dirección de entrega**, que es obligatorio
   y se guarda en el pedido, su JSON y los correos.
 - `/pagos` → Genera un **cobro Yappy** con un código único (p. ej. `CC-7K3P9Q`) y abre
@@ -45,8 +48,9 @@ Abrir **http://127.0.0.1:5000**
      «¡Pago confirmado!» automáticamente.
   2. **Número Yappy**: el cliente envía el monto al número del comercio con el código en el mensaje;
      el cajero anota el número de transacción recibido y confirma.
-  Al confirmar se genera el JSON en `pagos_json/` y el pedido pasa a `PAGADO`
-  (o `PAGADO - DESPACHAR (FLETE)` si eligió flete). Un pedido pagado no se puede cobrar dos veces.
+  Al confirmar se genera el JSON en `pagos_json/` (con el detalle del pedido), se **envía por correo**
+  al cliente y a la empresa, y el pedido pasa a `PAGADO` (o `PAGADO - DESPACHAR (FLETE)` si eligió flete).
+  Si no hay servidor SMTP configurado, el envío queda registrado en `correos_enviados.log` y el sitio avisa. Un pedido pagado no se puede cobrar dos veces.
   El número y el nombre de directorio se configuran con `YAPPY_TELEFONO` y `YAPPY_DIRECTORIO`.
   Para escanear el QR con un celular, este debe estar en la misma red Wi-Fi que la computadora.
 

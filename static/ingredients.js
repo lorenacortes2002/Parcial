@@ -25,3 +25,18 @@ if (select) {
   select.addEventListener("change", update);
   update();
 }
+
+// Solo los combos incluyen soda: el campo se oculta para pizzas individuales.
+const typeRadios = document.querySelectorAll('input[name="tipo"]');
+const comboSoda = document.querySelector("#combo-soda");
+
+if (typeRadios.length && comboSoda) {
+  const sodaSelect = comboSoda.querySelector("select");
+  const applyType = () => {
+    const isCombo = document.querySelector('input[name="tipo"]:checked')?.value === "COMBO";
+    comboSoda.hidden = !isCombo;
+    sodaSelect.disabled = !isCombo;
+  };
+  typeRadios.forEach((radio) => radio.addEventListener("change", applyType));
+  applyType();
+}

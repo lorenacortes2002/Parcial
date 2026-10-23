@@ -36,11 +36,13 @@ app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET_KEY") or secrets.token_h
 MIN_DIRECCION = 10
 MAX_DIRECCION = 300
 
-MIN_INGREDIENTES = 2
+MIN_INGREDIENTES = 1
 MAX_INGREDIENTES = 10
 
+# El queso mozzarella es la base de todas las pizzas, por eso no se ofrece
+# como ingrediente (sería redundante).
 INGREDIENTES_DISPONIBLES = [
-    "queso mozzarella", "pepperoni", "jamón", "piña", "champiñones",
+    "pepperoni", "jamón", "piña", "champiñones",
     "pimentón", "cebolla", "aceitunas", "tocineta", "maíz",
     "salsa de tomate", "parmesano", "queso azul", "gouda", "chorizo",
 ]
@@ -112,6 +114,13 @@ def _describir_sodas(cantidad, tamano, detalle):
     return f"{sabores} ({TAMANOS_SODA[tamano]})"
 
 
+# Tipos de producto de la Fábrica: solo los combos incluyen soda.
+TIPOS_PRODUCTO = {
+    "COMBO": "Combo (pizza + soda)",
+    "PIZZA": "Pizza individual",
+}
+MIN_COMBOS = 5
+
 # Formas de entrega que admite cada pizza (valor guardado -> texto visible).
 ENTREGAS_PIZZA = {
     "AMBOS": "Domicilio y retiro en sitio",
@@ -121,30 +130,59 @@ ENTREGAS_PIZZA = {
 
 
 def _pizza_fields_from_form():
+    tipo = request.form.get("tipo", "COMBO")
     nombre = request.form.get("nombre", "").strip()
     ingredientes = request.form.getlist("ingredientes")
     refresco = request.form.get("refresco", "")
     precio = float(request.form.get("precio", "0"))
     entrega = request.form.get("entrega", "AMBOS")
 
+    if tipo not in TIPOS_PRODUCTO:
+        raise ValueError("Seleccione si es un combo o una pizza individual.")
     if not nombre:
-        raise ValueError("El nombre de la pizza es obligatorio.")
+        raise ValueError("El nombre es obligatorio.")
     if len(ingredientes) < MIN_INGREDIENTES or len(ingredientes) > MAX_INGREDIENTES:
         raise ValueError(
-            f"Debe seleccionar entre {MIN_INGREDIENTES} y {MAX_INGREDIENTES} ingredientes."
+            f"Debe seleccionar entre {MIN_INGREDIENTES} y {MAX_INGREDIENTES} ingredientes "
+            "(el queso mozzarella ya viene incluido)."
         )
     if len(set(ingredientes)) != len(ingredientes) or not set(ingredientes).issubset(
         INGREDIENTES_DISPONIBLES
     ):
         raise ValueError("Seleccione ingredientes válidos y sin duplicados.")
-    if refresco not in REFRESCOS_DISPONIBLES:
-        raise ValueError("Seleccione un refresco válido.")
+    if tipo == "COMBO":
+        if refresco not in SABORES_SODA:
+            raise ValueError("Seleccione la soda que incluye el combo.")
+    else:
+        refresco = None  # las pizzas individuales no incluyen soda
     if not math.isfinite(precio) or precio <= 0:
         raise ValueError("El precio debe ser un número mayor a cero.")
     if entrega not in ENTREGAS_PIZZA:
         raise ValueError("Seleccione una forma de entrega válida.")
 
-    return nombre, ingredientes, refresco, precio, entrega
+    return tipo, nombre, ingredientes, refresco, precio, entrega
+
+
+def _contar_combos(excluir_id=None):
+    conn = database.get_local_conn()
+    try:
+        return conn.execute(
+            "SELECT COUNT(*) FROM pizzas WHERE tipo='COMBO' AND id IS NOT ?", (excluir_id,)
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+
+def _fabrica_form_context(pizza, tipo_actual, entrega_actual, ingredientes_actuales):
+    return dict(
+        pizza=pizza,
+        ingredientes_disponibles=INGREDIENTES_DISPONIBLES,
+        sabores_soda=SABORES_SODA,
+        tipos_producto=TIPOS_PRODUCTO, tipo_actual=tipo_actual,
+        entregas_pizza=ENTREGAS_PIZZA, entrega_actual=entrega_actual,
+        ingredientes_actuales=ingredientes_actuales,
+        min_ing=MIN_INGREDIENTES, max_ing=MAX_INGREDIENTES,
+    )
 
 
 def _notify_json_recipients(recipients, subject, json_data, ruta_json):
@@ -177,12 +215,17 @@ def _notify_json_recipients(recipients, subject, json_data, ruta_json):
 def index():
     try:
         conn = database.get_local_conn()
-        pizzas = conn.execute("SELECT * FROM pizzas").fetchall()
+        pizzas = conn.execute("SELECT * FROM pizzas ORDER BY id").fetchall()
         conn.close()
     except sqlite3.Error as e:
         flash(f"Error al cargar el menú: {e}", "danger")
         pizzas = []
-    return render_template("index.html", pizzas=pizzas, entregas_pizza=ENTREGAS_PIZZA)
+    return render_template(
+        "index.html",
+        combos=[p for p in pizzas if p["tipo"] == "COMBO"],
+        individuales=[p for p in pizzas if p["tipo"] == "PIZZA"],
+        entregas_pizza=ENTREGAS_PIZZA,
+    )
 
 
 # ----------------------------------------------------------------------
@@ -197,38 +240,45 @@ def fabrica():
     except sqlite3.Error as e:
         flash(f"Error al consultar pizzas: {e}", "danger")
         pizzas = []
-    return render_template("fabrica.html", pizzas=pizzas, entregas_pizza=ENTREGAS_PIZZA)
+    return render_template(
+        "fabrica.html", pizzas=pizzas, entregas_pizza=ENTREGAS_PIZZA,
+        tipos_producto=TIPOS_PRODUCTO,
+        total_combos=sum(1 for p in pizzas if p["tipo"] == "COMBO"), min_combos=MIN_COMBOS,
+    )
 
 
 @app.route("/fabrica/nueva", methods=["GET", "POST"])
 def fabrica_nueva():
     if request.method == "POST":
         try:
-            nombre, ingredientes, refresco, precio, entrega = _pizza_fields_from_form()
+            tipo, nombre, ingredientes, refresco, precio, entrega = _pizza_fields_from_form()
 
             ok, last_id, error = database.replicate_write(
-                "INSERT INTO pizzas (nombre, ingredientes, refresco, precio, entrega) "
-                "VALUES (?,?,?,?,?)",
-                (nombre, ",".join(ingredientes), refresco, precio, entrega),
+                "INSERT INTO pizzas (nombre, ingredientes, refresco, precio, entrega, tipo) "
+                "VALUES (?,?,?,?,?,?)",
+                (nombre, ",".join(ingredientes), refresco, precio, entrega, tipo),
             )
             if not ok:
                 raise RuntimeError(error)
             if error:
                 flash(error, "warning")
 
-            flash(f"Pizza '{nombre}' creada correctamente (guardada y replicada).", "success")
+            producto = "Combo" if tipo == "COMBO" else "Pizza"
+            flash(f"{producto} '{nombre}' creado correctamente (guardado y replicado).", "success")
             return redirect(url_for("fabrica"))
 
         except (ValueError, RuntimeError) as e:
             flash(f"Error: {e}", "danger")
 
+    tipo_actual = request.form.get("tipo") or request.args.get("tipo", "COMBO")
     return render_template(
-        "fabrica_form.html", pizza=None,
-        ingredientes_disponibles=INGREDIENTES_DISPONIBLES,
-        refrescos_disponibles=REFRESCOS_DISPONIBLES,
-        entregas_pizza=ENTREGAS_PIZZA, entrega_actual=request.form.get("entrega", "AMBOS"),
-        ingredientes_actuales=request.form.getlist("ingredientes"),
-        min_ing=MIN_INGREDIENTES, max_ing=MAX_INGREDIENTES,
+        "fabrica_form.html",
+        **_fabrica_form_context(
+            {"refresco": request.form.get("refresco")} if request.method == "POST" else None,
+            tipo_actual if tipo_actual in TIPOS_PRODUCTO else "COMBO",
+            request.form.get("entrega", "AMBOS"),
+            request.form.getlist("ingredientes"),
+        ),
     )
 
 
@@ -248,32 +298,36 @@ def fabrica_editar(pizza_id):
 
     if request.method == "POST":
         try:
-            nombre, ingredientes, refresco, precio, entrega = _pizza_fields_from_form()
+            tipo, nombre, ingredientes, refresco, precio, entrega = _pizza_fields_from_form()
+            if (
+                pizza["tipo"] == "COMBO" and tipo != "COMBO"
+                and _contar_combos(excluir_id=pizza_id) < MIN_COMBOS
+            ):
+                raise ValueError(
+                    f"El catálogo debe conservar al menos {MIN_COMBOS} combos; "
+                    "no se puede convertir este combo en pizza individual."
+                )
 
             ok, _, error = database.replicate_write(
-                "UPDATE pizzas SET nombre=?, ingredientes=?, refresco=?, precio=?, entrega=? "
-                "WHERE id=?",
-                (nombre, ",".join(ingredientes), refresco, precio, entrega, pizza_id),
+                "UPDATE pizzas SET nombre=?, ingredientes=?, refresco=?, precio=?, entrega=?, "
+                "tipo=? WHERE id=?",
+                (nombre, ",".join(ingredientes), refresco, precio, entrega, tipo, pizza_id),
             )
             if not ok:
                 raise RuntimeError(error)
             if error:
                 flash(error, "warning")
 
-            flash(f"Pizza '{nombre}' actualizada correctamente.", "success")
+            flash(f"'{nombre}' actualizado correctamente.", "success")
             return redirect(url_for("fabrica"))
 
-        except (ValueError, RuntimeError) as e:
+        except (ValueError, RuntimeError, sqlite3.Error) as e:
             flash(f"Error: {e}", "danger")
 
     ingredientes_actuales = pizza["ingredientes"].split(",") if pizza["ingredientes"] else []
     return render_template(
-        "fabrica_form.html", pizza=pizza,
-        ingredientes_disponibles=INGREDIENTES_DISPONIBLES,
-        refrescos_disponibles=REFRESCOS_DISPONIBLES,
-        entregas_pizza=ENTREGAS_PIZZA, entrega_actual=pizza["entrega"],
-        ingredientes_actuales=ingredientes_actuales,
-        min_ing=MIN_INGREDIENTES, max_ing=MAX_INGREDIENTES,
+        "fabrica_form.html",
+        **_fabrica_form_context(pizza, pizza["tipo"], pizza["entrega"], ingredientes_actuales),
     )
 
 
@@ -281,13 +335,14 @@ def fabrica_editar(pizza_id):
 def fabrica_eliminar(pizza_id):
     try:
         conn = database.get_local_conn()
-        pizza_count = conn.execute("SELECT COUNT(*) FROM pizzas").fetchone()[0]
+        pizza = conn.execute("SELECT tipo FROM pizzas WHERE id=?", (pizza_id,)).fetchone()
         conn.close()
+        combos_restantes = _contar_combos(excluir_id=pizza_id)
     except sqlite3.Error as e:
         flash(f"Error al comprobar el catálogo: {e}", "danger")
         return redirect(url_for("fabrica"))
 
-    if pizza_count <= 5:
+    if pizza is not None and pizza["tipo"] == "COMBO" and combos_restantes < MIN_COMBOS:
         flash("El catálogo debe conservar al menos cinco combos.", "warning")
         return redirect(url_for("fabrica"))
 
@@ -350,8 +405,6 @@ def pedidos():
                 raise ValueError("Indique un correo electrónico válido.")
             if cantidad < 1:
                 raise ValueError("La cantidad debe ser al menos 1.")
-            sodas_cantidad, sodas_tamano, sodas_detalle = _sodas_from_form()
-            refresco = _describir_sodas(sodas_cantidad, sodas_tamano, sodas_detalle)
             if retiro_o_flete not in ("RETIRO EN SITIO", "FLETE A DOMICILIO"):
                 raise ValueError("Seleccione un método de entrega válido.")
             if retiro_o_flete == "FLETE A DOMICILIO":
@@ -372,6 +425,12 @@ def pedidos():
             conn.close()
             if pizza is None:
                 raise ValueError("La pizza seleccionada no existe.")
+            if pizza["tipo"] == "COMBO":
+                sodas_cantidad, sodas_tamano, sodas_detalle = _sodas_from_form()
+            else:
+                # Solo los combos incluyen sodas.
+                sodas_cantidad, sodas_tamano, sodas_detalle = 0, None, []
+            refresco = _describir_sodas(sodas_cantidad, sodas_tamano, sodas_detalle)
             if pizza["entrega"] != "AMBOS" and retiro_o_flete != pizza["entrega"]:
                 raise ValueError(
                     f"La pizza '{pizza['nombre']}' solo está disponible para "
@@ -406,16 +465,14 @@ def pedidos():
                 "total": total, "retiro_o_flete": retiro_o_flete,
                 "direccion": direccion, "estado": "CONFIRMADO", "fecha": fecha,
             }
-            json_data, ruta_json = generar_json_pedido(pedido_dict)
-
-            _notify_json_recipients(
-                (
-                    correo_cliente,
-                    EMPRESA_CORREO,
-                ),
-                f"Confirmación del pedido #{pedido_id} - CHINOS CAFÉ S.A.",
-                json_data,
-                ruta_json,
+            # El JSON del pedido queda registrado, pero solo se envía por correo
+            # (junto con el pago) cuando el pedido se paga.
+            _, ruta_json = generar_json_pedido(pedido_dict)
+            if not ruta_json:
+                flash("No se pudo crear el archivo JSON del pedido.", "warning")
+            flash(
+                "Recibirás la confirmación en JSON por correo cuando se realice el pago.",
+                "success",
             )
 
             flash(f"Pedido #{pedido_id} confirmado y guardado en ambas bases.", "success")
@@ -521,8 +578,11 @@ def _confirmar_cobro(cobro, pedido, referencia):
         "monto": cobro["monto"], "estado": "CONFIRMADO", "fecha": fecha,
     }
     pedido_dict = {
-        "cliente": pedido["cliente"], "retiro_o_flete": pedido["retiro_o_flete"],
-        "direccion": pedido["direccion"],
+        "cliente": pedido["cliente"], "correo_cliente": pedido["correo_cliente"],
+        "pizza_nombre": pedido["pizza_nombre"], "cantidad": pedido["cantidad"],
+        "refresco": pedido["refresco"], "total": pedido["total"],
+        "retiro_o_flete": pedido["retiro_o_flete"], "direccion": pedido["direccion"],
+        "fecha": pedido["fecha"],
     }
     json_data, ruta_json = generar_json_pago(pago_dict, pedido_dict)
     _notify_json_recipients(

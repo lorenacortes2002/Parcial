@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS pizzas (
     ingredientes TEXT NOT NULL,      -- separados por coma, min 2 - max 10
     refresco TEXT,
     precio REAL NOT NULL DEFAULT 5.00,
-    entrega TEXT NOT NULL DEFAULT 'AMBOS'   -- AMBOS / RETIRO EN SITIO / FLETE A DOMICILIO
+    entrega TEXT NOT NULL DEFAULT 'AMBOS',  -- AMBOS / RETIRO EN SITIO / FLETE A DOMICILIO
+    tipo TEXT NOT NULL DEFAULT 'COMBO'      -- COMBO (incluye soda) / PIZZA (individual)
 );
 
 CREATE TABLE IF NOT EXISTS pedidos (
@@ -89,6 +90,8 @@ def _migrate(conn):
     columnas = {row["name"] for row in conn.execute("PRAGMA table_info(pizzas)")}
     if "entrega" not in columnas:
         conn.execute("ALTER TABLE pizzas ADD COLUMN entrega TEXT NOT NULL DEFAULT 'AMBOS'")
+    if "tipo" not in columnas:
+        conn.execute("ALTER TABLE pizzas ADD COLUMN tipo TEXT NOT NULL DEFAULT 'COMBO'")
     try:
         # Un pedido solo puede tener un pago: evita cobros dobles simultáneos.
         conn.execute(
@@ -134,36 +137,45 @@ def init_db():
             if conn is not None:
                 conn.close()
 
-    # Garantiza cinco combos iniciales y replica el catálogo con sus mismos IDs.
+    # Garantiza cinco combos y algunas pizzas individuales iniciales, y replica
+    # el catálogo con sus mismos IDs. El queso mozzarella es la base de todas
+    # las pizzas, por eso no aparece en la lista de ingredientes.
     try:
         conn = get_local_conn()
         demo_pizzas = [
-            ("Pepperoni Clásica", "queso mozzarella,pepperoni,salsa de tomate", "Coca-Cola", 7.50),
-            ("Hawaiana", "queso mozzarella,jamón,piña,salsa de tomate", "Sprite", 7.75),
-            ("Vegetariana", "queso mozzarella,pimentón,cebolla,champiñones,aceitunas", "Agua", 7.25),
-            ("Suprema Chinos", "queso mozzarella,pepperoni,jamón,champiñones,pimentón,cebolla", "Fanta", 8.90),
-            ("Cuatro Quesos", "queso mozzarella,parmesano,queso azul,gouda", "Coca-Cola Zero", 8.50),
+            ("Pepperoni Clásica", "pepperoni,salsa de tomate", "Coca-Cola", 7.50, "COMBO"),
+            ("Hawaiana", "jamón,piña,salsa de tomate", "Sprite", 7.75, "COMBO"),
+            ("Vegetariana", "pimentón,cebolla,champiñones,aceitunas", "Agua", 7.25, "COMBO"),
+            ("Suprema Chinos", "pepperoni,jamón,champiñones,pimentón,cebolla", "Fanta", 8.90, "COMBO"),
+            ("Cuatro Quesos", "parmesano,queso azul,gouda", "Coca-Cola Zero", 8.50, "COMBO"),
+            ("Margarita", "salsa de tomate", None, 5.50, "PIZZA"),
+            ("Pepperoni", "pepperoni", None, 6.00, "PIZZA"),
+            ("Jamón y Champiñones", "jamón,champiñones", None, 6.50, "PIZZA"),
         ]
-        # Versiones anteriores guardaban "mozzarella", que no coincide con el
-        # ingrediente "queso mozzarella" del formulario de la Fábrica.
+        # Versiones anteriores incluían "queso mozzarella" (o "mozzarella")
+        # como ingrediente: se quita porque ya es la base de todas las pizzas.
         for row in conn.execute(
-            "SELECT id, ingredientes FROM pizzas WHERE ',' || ingredientes || ',' LIKE '%,mozzarella,%'"
+            "SELECT id, ingredientes FROM pizzas "
+            "WHERE ',' || ingredientes || ',' LIKE '%,mozzarella,%' "
+            "OR ',' || ingredientes || ',' LIKE '%,queso mozzarella,%'"
         ).fetchall():
-            corregidos = []
-            for ing in row["ingredientes"].split(","):
-                ing = "queso mozzarella" if ing == "mozzarella" else ing
-                if ing not in corregidos:
-                    corregidos.append(ing)
-            conn.execute(
-                "UPDATE pizzas SET ingredientes=? WHERE id=?", (",".join(corregidos), row["id"])
-            )
+            restantes = [
+                ing for ing in row["ingredientes"].split(",")
+                if ing not in ("mozzarella", "queso mozzarella")
+            ]
+            if restantes:
+                conn.execute(
+                    "UPDATE pizzas SET ingredientes=? WHERE id=?",
+                    (",".join(restantes), row["id"]),
+                )
         existing_names = {
             row["nombre"] for row in conn.execute("SELECT nombre FROM pizzas").fetchall()
         }
         for pizza in demo_pizzas:
             if pizza[0] not in existing_names:
                 conn.execute(
-                    "INSERT INTO pizzas (nombre, ingredientes, refresco, precio) VALUES (?,?,?,?)",
+                    "INSERT INTO pizzas (nombre, ingredientes, refresco, precio, tipo) "
+                    "VALUES (?,?,?,?,?)",
                     pizza,
                 )
         conn.commit()
@@ -176,18 +188,20 @@ def init_db():
                 for pizza in pizzas:
                     replica_conn.execute(
                         """
-                        INSERT INTO pizzas (id, nombre, ingredientes, refresco, precio, entrega)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        INSERT INTO pizzas (id, nombre, ingredientes, refresco, precio, entrega, tipo)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(id) DO UPDATE SET
                             nombre=excluded.nombre,
                             ingredientes=excluded.ingredientes,
                             refresco=excluded.refresco,
                             precio=excluded.precio,
-                            entrega=excluded.entrega
+                            entrega=excluded.entrega,
+                            tipo=excluded.tipo
                         """,
                         (
                             pizza["id"], pizza["nombre"], pizza["ingredientes"],
                             pizza["refresco"], pizza["precio"], pizza["entrega"],
+                            pizza["tipo"],
                         ),
                     )
         finally:

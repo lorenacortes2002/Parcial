@@ -5,38 +5,40 @@
   <div class="page-heading">
     <p class="eyebrow">Administración</p>
     <h1>Fábrica de pizzas</h1>
-    <p>Organiza las recetas y los combos disponibles en el menú.</p>
+    <p>Organiza los combos y las pizzas individuales disponibles en el menú.</p>
   </div>
   <div class="catalog-actions">
-    <span class="catalog-count"><strong>{{ pizzas|length }}</strong> combos disponibles <span>· mínimo 5</span></span>
-    <a class="btn" href="{{ url_for('fabrica_nueva') }}">+ Nueva pizza</a>
+    <span class="catalog-count"><strong>{{ total_combos }}</strong> combos <span>· mínimo {{ min_combos }}</span> · <strong>{{ pizzas|length - total_combos }}</strong> pizzas individuales</span>
+    <a class="btn" href="{{ url_for('fabrica_nueva', tipo='COMBO') }}">+ Nuevo combo</a>
+    <a class="btn btn-secondary" href="{{ url_for('fabrica_nueva', tipo='PIZZA') }}">+ Nueva pizza</a>
   </div>
 </div>
 
 <div class="table-wrap">
 <table class="tabla">
   <thead>
-    <tr><th>#</th><th>Nombre</th><th>Ingredientes</th><th>Refresco</th><th>Entrega</th><th>Precio</th><th>Acciones</th></tr>
+    <tr><th>#</th><th>Tipo</th><th>Nombre</th><th>Ingredientes</th><th>Soda</th><th>Entrega</th><th>Precio</th><th>Acciones</th></tr>
   </thead>
   <tbody>
     {% for p in pizzas %}
     <tr>
       <td>{{ p.id }}</td>
+      <td><span class="estado {{ 'tipo-combo' if p.tipo == 'COMBO' else 'tipo-pizza' }}">{{ 'Combo' if p.tipo == 'COMBO' else 'Pizza' }}</span></td>
       <td>{{ p.nombre }}</td>
       <td>{{ p.ingredientes.replace(',', ', ') }}</td>
-      <td>{{ p.refresco }}</td>
+      <td>{{ p.refresco if p.tipo == 'COMBO' else '—' }}</td>
       <td><span class="estado entrega-badge">{{ entregas_pizza[p.entrega] }}</span></td>
       <td>${{ "%.2f"|format(p.precio) }}</td>
       <td class="acciones">
         <a href="{{ url_for('fabrica_editar', pizza_id=p.id) }}">Editar</a>
         <form method="POST" action="{{ url_for('fabrica_eliminar', pizza_id=p.id) }}"
-              onsubmit="return confirm('¿Eliminar esta pizza?');">
+              onsubmit="return confirm('¿Eliminar este producto?');">
           <button type="submit" class="link-danger">Eliminar</button>
         </form>
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="7">Todavía no hay pizzas registradas. Crea la primera para completar el menú.</td></tr>
+    <tr><td colspan="8">Todavía no hay pizzas registradas. Crea la primera para completar el menú.</td></tr>
     {% endfor %}
   </tbody>
 </table>
