@@ -1,58 +1,43 @@
-const picker = document.querySelector("#ingredient-picker");
+const select = document.querySelector("#ingredientes[multiple]");
 
-if (picker) {
-  const min = Number(picker.dataset.min);
-  const max = Number(picker.dataset.max);
-  const boxes = [...picker.querySelectorAll('input[name="ingredientes"]')];
+if (select) {
+  const min = Number(select.dataset.min);
+  const max = Number(select.dataset.max);
   const count = document.querySelector("#ingredient-count");
-  const list = document.querySelector("#ingredient-list");
+  const summary = document.querySelector("#ingredient-summary");
 
-  // Cada clic en un cuadro añade o quita el ingrediente de la lista,
-  // en el orden en que se fue eligiendo.
-  const order = boxes.filter((box) => box.checked).map((box) => box.value);
+  const update = () => {
+    const chosen = [...select.selectedOptions].map((option) => option.value);
+    count.textContent = `${chosen.length} / ${max}`;
+    count.classList.toggle("is-ok", chosen.length >= min && chosen.length <= max);
+    summary.textContent = chosen.length ? `Seleccionados: ${chosen.join(", ")}` : "";
 
-  const render = () => {
-    const selected = order.length;
-    count.textContent = `${selected} / ${max}`;
-    count.classList.toggle("is-ok", selected >= min && selected <= max);
-
-    list.replaceChildren(
-      ...order.map((value) => {
-        const item = document.createElement("li");
-        const remove = document.createElement("button");
-        remove.type = "button";
-        remove.textContent = value;
-        remove.title = `Quitar ${value}`;
-        remove.setAttribute("aria-label", `Quitar ${value}`);
-        remove.addEventListener("click", () => {
-          const box = boxes.find((b) => b.value === value);
-          box.checked = false;
-          box.dispatchEvent(new Event("change"));
-        });
-        item.append(remove);
-        return item;
-      })
-    );
-
-    // Al llegar al máximo se bloquean los demás cuadros.
-    boxes.forEach((box) => {
-      box.disabled = !box.checked && selected >= max;
-      box.closest(".ingredient-tile").classList.toggle("is-disabled", box.disabled);
-    });
-
-    const message =
-      selected < min ? `Seleccione al menos ${min} ingredientes.` : "";
-    boxes[0].setCustomValidity(message);
+    let message = "";
+    if (chosen.length < min) message = `Seleccione al menos ${min} ingredientes.`;
+    if (chosen.length > max) message = `Seleccione como máximo ${max} ingredientes.`;
+    select.setCustomValidity(message);
   };
 
-  boxes.forEach((box) => {
-    box.addEventListener("change", () => {
-      const index = order.indexOf(box.value);
-      if (box.checked && index === -1) order.push(box.value);
-      if (!box.checked && index !== -1) order.splice(index, 1);
-      render();
-    });
+  // Un clic sobre un ingrediente lo añade o lo quita sin borrar los demás,
+  // como si se mantuviera Ctrl presionado.
+  select.addEventListener("mousedown", (event) => {
+    const option = event.target.closest("option");
+    if (!option) return;
+    event.preventDefault();
+
+    if (!option.selected && select.selectedOptions.length >= max) {
+      count.classList.add("is-shake");
+      setTimeout(() => count.classList.remove("is-shake"), 400);
+      return;
+    }
+
+    const scroll = select.scrollTop;
+    option.selected = !option.selected;
+    select.focus();
+    select.scrollTop = scroll; // evita que la lista salte al enfocar
+    select.dispatchEvent(new Event("change", { bubbles: true }));
   });
 
-  render();
+  select.addEventListener("change", update);
+  update();
 }
