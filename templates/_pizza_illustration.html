@@ -1,0 +1,183 @@
+<svg class="pizza-illustration" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" fill="none" focusable="false">
+  <defs>
+    <radialGradient id="crust-{{ pizza_variant }}" cx="38%" cy="28%" r="75%">
+      <stop stop-color="#FFE6A1"/>
+      <stop offset=".68" stop-color="#EAAE53"/>
+      <stop offset="1" stop-color="#B96832"/>
+    </radialGradient>
+    <radialGradient id="cheese-{{ pizza_variant }}" cx="40%" cy="32%" r="78%">
+      <stop stop-color="#FFE994"/>
+      <stop offset=".72" stop-color="#F3C75F"/>
+      <stop offset="1" stop-color="#D8913D"/>
+    </radialGradient>
+    <radialGradient id="pepperoni-{{ pizza_variant }}" cx="33%" cy="28%" r="75%">
+      <stop stop-color="#F77B50"/>
+      <stop offset=".42" stop-color="#D84F32"/>
+      <stop offset="1" stop-color="#9E2E25"/>
+    </radialGradient>
+    <radialGradient id="olive-{{ pizza_variant }}" cx="35%" cy="30%" r="70%">
+      <stop stop-color="#75834A"/>
+      <stop offset="1" stop-color="#34452F"/>
+    </radialGradient>
+    <pattern id="crust-speckles-{{ pizza_variant }}" width="21" height="19" patternUnits="userSpaceOnUse">
+      <circle cx="4" cy="5" r="1.2" fill="#9D542B" opacity=".4"/>
+      <circle cx="15" cy="12" r="1.5" fill="#FFF0B6" opacity=".65"/>
+      <circle cx="19" cy="3" r=".8" fill="#A75B30" opacity=".35"/>
+      <circle cx="8" cy="17" r=".9" fill="#B96A32" opacity=".4"/>
+    </pattern>
+    <filter id="topping-shadow-{{ pizza_variant }}" x="-.3" y="-.3" width="1.6" height="1.8">
+      <feDropShadow dx="0" dy="2" stdDeviation="1.4" flood-color="#6F321F" flood-opacity=".38"/>
+    </filter>
+    <clipPath id="pizza-edge-{{ pizza_variant }}">
+      <circle cx="120" cy="116" r="94"/>
+    </clipPath>
+  </defs>
+
+  <ellipse cx="122" cy="218" rx="75" ry="10" fill="#50331F" opacity=".13"/>
+  <circle cx="120" cy="116" r="101" fill="#7A4529" opacity=".32"/>
+  <circle cx="120" cy="112" r="99" fill="#C27A38"/>
+  <circle cx="120" cy="110" r="96" fill="url(#crust-{{ pizza_variant }})"/>
+  <circle cx="120" cy="110" r="96" fill="url(#crust-speckles-{{ pizza_variant }})" opacity=".85"/>
+  <circle cx="120" cy="110" r="84" fill="#B9432B"/>
+  <circle cx="120" cy="110" r="81" fill="url(#cheese-{{ pizza_variant }})"/>
+  <g clip-path="url(#pizza-edge-{{ pizza_variant }})">
+    <path d="M120 110 120 29M120 110 177.3 52.7M120 110 201 110M120 110 177.3 167.3M120 110 120 191M120 110 62.7 167.3M120 110 39 110M120 110 62.7 52.7"
+      stroke="#FFF0C4" stroke-width="2.4" stroke-linecap="round" opacity=".86"/>
+    <path d="M120 110 120 31M120 110 199 110M120 110 120 189M120 110 41 110"
+      stroke="#CB8B3D" stroke-width=".8" stroke-linecap="round" opacity=".68"/>
+
+    <g filter="url(#topping-shadow-{{ pizza_variant }})">
+      {% if pizza_variant in [0, 3] %}
+      <g>
+        <circle cx="85" cy="66" r="10.2" fill="#8F3025"/>
+        <circle cx="85" cy="64.5" r="8.7" fill="url(#pepperoni-{{ pizza_variant }})"/>
+        <circle cx="82" cy="62" r="2" fill="#FFB080" opacity=".7"/>
+        <circle cx="90" cy="67" r="1.2" fill="#7B2822" opacity=".75"/>
+      </g>
+      <g>
+        <circle cx="143" cy="57" r="9.3" fill="#8F3025"/>
+        <circle cx="143" cy="55.5" r="7.8" fill="url(#pepperoni-{{ pizza_variant }})"/>
+        <circle cx="140.5" cy="53" r="1.8" fill="#FFB080" opacity=".7"/>
+        <circle cx="148" cy="57" r="1.1" fill="#7B2822" opacity=".75"/>
+      </g>
+      <g>
+        <circle cx="165" cy="100" r="10.5" fill="#8F3025"/>
+        <circle cx="165" cy="98.5" r="9" fill="url(#pepperoni-{{ pizza_variant }})"/>
+        <circle cx="162" cy="96" r="2" fill="#FFB080" opacity=".7"/>
+        <circle cx="170" cy="100" r="1.2" fill="#7B2822" opacity=".75"/>
+      </g>
+      <g>
+        <circle cx="142" cy="146" r="9.7" fill="#8F3025"/>
+        <circle cx="142" cy="144.5" r="8.2" fill="url(#pepperoni-{{ pizza_variant }})"/>
+        <circle cx="139" cy="142" r="1.8" fill="#FFB080" opacity=".7"/>
+        <circle cx="147" cy="146" r="1.1" fill="#7B2822" opacity=".75"/>
+      </g>
+      <g>
+        <circle cx="88" cy="154" r="10" fill="#8F3025"/>
+        <circle cx="88" cy="152.5" r="8.5" fill="url(#pepperoni-{{ pizza_variant }})"/>
+        <circle cx="85" cy="150" r="1.9" fill="#FFB080" opacity=".7"/>
+        <circle cx="93" cy="154" r="1.1" fill="#7B2822" opacity=".75"/>
+      </g>
+      <g>
+        <circle cx="61" cy="111" r="9.2" fill="#8F3025"/>
+        <circle cx="61" cy="109.5" r="7.7" fill="url(#pepperoni-{{ pizza_variant }})"/>
+        <circle cx="58" cy="107" r="1.7" fill="#FFB080" opacity=".7"/>
+      </g>
+
+      {% endif %}
+      {% if pizza_variant in [0, 3] %}
+      <g fill="#F6E8C3" stroke="#D8B977" stroke-width="1.5">
+        <path d="M107 75c0-7 4-12 9-12s9 5 9 12v2h-18v-2Z"/>
+        <path d="M108 76h16v3h-16z" fill="#B88749"/>
+        <path d="M157 128c0-6 3-10 8-10s8 4 8 10v2h-16v-2Z"/>
+        <path d="M157 130h16v3h-16z" fill="#B88749"/>
+        <path d="M75 128c0-6 3-10 8-10s8 4 8 10v2H75v-2Z"/>
+        <path d="M75 130h16v3H75z" fill="#B88749"/>
+      </g>
+      {% endif %}
+
+      {% if pizza_variant in [0, 2, 3] %}
+      <g fill="url(#olive-{{ pizza_variant }})" stroke="#F2D77B" stroke-width="2">
+        <circle cx="112" cy="94" r="5.2"/>
+        <circle cx="130" cy="129" r="5.2"/>
+        <circle cx="101" cy="143" r="4.7"/>
+        <circle cx="151" cy="79" r="4.4"/>
+      </g>
+      <g fill="#F4D56E">
+        <circle cx="112" cy="94" r="1.7"/>
+        <circle cx="130" cy="129" r="1.7"/>
+        <circle cx="101" cy="143" r="1.5"/>
+        <circle cx="151" cy="79" r="1.4"/>
+      </g>
+      {% endif %}
+
+      {% if pizza_variant in [0, 2, 3] %}
+      <g fill="#548047">
+        <path d="M103 105c-9-9-13-7-15-6 4 8 9 10 15 6Z"/>
+        <path d="M104 105c5-10 10-10 13-9-2 8-6 11-13 9Z"/>
+        <path d="M105 104c-3 7-2 12 1 15 5-6 4-11-1-15Z"/>
+        <path d="M150 109c-8-8-12-6-14-4 4 7 9 8 14 4Z"/>
+        <path d="M149 109c5-9 10-9 12-8-2 7-6 10-12 8Z"/>
+      </g>
+      <g stroke="#B5C67A" stroke-width="1" opacity=".8">
+        <path d="m91 99 12 6m35 1 11 4"/>
+        <path d="m103 106 5-9m44 13 5-8"/>
+      </g>
+      {% endif %}
+
+      {% if pizza_variant == 1 %}
+      <g fill="#D78A58" stroke="#A9563D" stroke-width="1.5">
+        <path d="M73 86c5-7 16-8 21-3l3 4c-5 7-16 8-22 3l-2-4Z"/>
+        <path d="M129 76c6-7 16-7 21-2l2 4c-5 7-15 8-21 3l-2-5Z"/>
+        <path d="M151 136c5-6 14-7 19-2l2 4c-4 6-14 7-19 2l-2-4Z"/>
+        <path d="M92 137c5-7 15-8 20-3l2 4c-5 7-15 8-21 3l-1-4Z"/>
+      </g>
+      <g fill="#F6C94E" stroke="#D79832" stroke-width="1.5">
+        <path d="m108 54 7-3 5 6-4 7-8-2-2-5 2-3Z"/>
+        <path d="m174 112 7-3 5 6-4 7-8-2-2-5 2-3Z"/>
+        <path d="m116 161 7-3 5 6-4 7-8-2-2-5 2-3Z"/>
+        <path d="m70 124 7-3 5 6-4 7-8-2-2-5 2-3Z"/>
+      </g>
+      {% endif %}
+
+      {% if pizza_variant == 2 %}
+      <g fill="none" stroke="#F3E8C9" stroke-width="4">
+        <ellipse cx="139" cy="91" rx="9" ry="6" transform="rotate(-32 139 91)"/>
+        <ellipse cx="78" cy="91" rx="8" ry="5" transform="rotate(28 78 91)"/>
+        <ellipse cx="119" cy="161" rx="8" ry="5" transform="rotate(-15 119 161)"/>
+      </g>
+      <g fill="none" stroke="#527B43" stroke-width="4" stroke-linecap="round">
+        <path d="m95 77 11-6m-11 6 7 8"/>
+        <path d="m157 153 11-6m-11 6 7 8"/>
+        <path d="m68 132 10-5m-10 5 6 7"/>
+      </g>
+      {% endif %}
+
+      {% if pizza_variant == 3 %}
+      <g fill="#D78A58" stroke="#A9563D" stroke-width="1.5">
+        <path d="M112 78c5-6 13-6 18-2l2 4c-4 6-13 7-18 2l-2-4Z"/>
+        <path d="M76 142c5-6 13-6 18-2l2 4c-4 6-13 7-18 2l-2-4Z"/>
+      </g>
+      <g fill="none" stroke="#527B43" stroke-width="4" stroke-linecap="round">
+        <path d="m129 92 10-5m-10 5 6 7"/>
+        <path d="m155 157 10-5m-10 5 6 7"/>
+        <path d="m72 128 10-5m-10 5 6 7"/>
+      </g>
+      {% endif %}
+
+      {% if pizza_variant == 4 %}
+      <g stroke="#E4C97F" stroke-width="1.5">
+        <path d="M79 68c5-4 13-2 15 3l-3 7c-6 2-12-1-13-6l1-4Z" fill="#FFF4D1"/>
+        <path d="M137 68c5-5 13-3 15 3l-4 7c-5 2-11-1-12-6l1-4Z" fill="#D9B76D"/>
+        <path d="M160 101c4-4 12-3 14 3l-3 7c-6 2-12-1-12-6l1-4Z" fill="#F5E3B1"/>
+        <path d="M127 145c5-5 13-3 15 3l-4 7c-5 2-11-1-12-6l1-4Z" fill="#C6A5A0"/>
+        <path d="M80 144c5-5 13-3 15 3l-4 7c-5 2-11-1-12-6l1-4Z" fill="#E5CA83"/>
+        <path d="M57 105c5-4 12-2 14 3l-3 7c-6 2-11-1-12-6l1-4Z" fill="#FFF4D1"/>
+      </g>
+      {% endif %}
+    </g>
+
+    <circle cx="120" cy="110" r="82" stroke="#FFF4CC" stroke-width="1.2" opacity=".7"/>
+  </g>
+  <circle cx="120" cy="110" r="96" stroke="#FFE3A0" stroke-width="2" opacity=".7"/>
+</svg>

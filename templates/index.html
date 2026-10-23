@@ -8,7 +8,9 @@
     <p>Recetas generosas, ingredientes frescos y ese sabor que invita a compartir.</p>
     <a class="btn btn-light" href="{{ url_for('pedidos') }}">Arma tu pedido <span aria-hidden="true">&nbsp;→</span></a>
   </div>
-  <div class="hero-art" aria-hidden="true"></div>
+  <div class="hero-art" aria-hidden="true">
+    {% with pizza_variant=0 %}{% include "_pizza_illustration.html" %}{% endwith %}
+  </div>
 </section>
 
 <section class="service-points" aria-label="Ventajas de CHINOS CAFÉ">
@@ -34,7 +36,9 @@
 <div class="grid">
   {% for p in pizzas %}
   <article class="card">
-    <div class="pizza-art pizza-art--{{ loop.index0 % 5 }}" aria-hidden="true"></div>
+    <div class="pizza-art pizza-art--{{ loop.index0 % 5 }}" aria-hidden="true">
+      {% with pizza_variant=loop.index0 %}{% include "_pizza_illustration.html" %}{% endwith %}
+    </div>
     <div class="card-body">
       <h3>{{ p.nombre }}</h3>
       <p class="muted">{{ p.ingredientes.replace(',', ', ') }}</p>
