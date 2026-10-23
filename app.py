@@ -323,9 +323,18 @@ def fabrica():
         pizzas = []
     return render_template(
         "fabrica.html", pizzas=pizzas, entregas_pizza=ENTREGAS_PIZZA,
-        tipos_producto=TIPOS_PRODUCTO,
+        tipos_producto=TIPOS_PRODUCTO, replicas_remotas=database.replicas_remotas(),
         total_combos=sum(1 for p in pizzas if p["tipo"] in TIPOS_COMBO), min_combos=MIN_COMBOS,
     )
+
+
+@app.route("/fabrica/sincronizar-replica", methods=["POST"])
+def fabrica_sincronizar_replica():
+    """Envía a cada máquina virtual una copia completa (por si estuvo apagada)."""
+    resultados = database.sincronizar_replicas_remotas()
+    for ok, mensaje in resultados:
+        flash(mensaje, "success" if ok else "danger")
+    return redirect(url_for("fabrica"))
 
 
 @app.route("/fabrica/nueva", methods=["GET", "POST"])
@@ -1121,6 +1130,33 @@ def yappy_pagar(codigo):
         "yappy_pagar.html", cobro=cobro, pedido=pedido,
         yappy_directorio=YAPPY_DIRECTORIO,
     )
+
+
+# ----------------------------------------------------------------------
+# RÉPLICA — rutas que usa la máquina virtual (sucursal Veraguas) para
+# recibir las escrituras de la PC principal. Protegidas con REPLICA_TOKEN.
+# ----------------------------------------------------------------------
+@app.route("/api/replica", methods=["POST"])
+def api_replica():
+    if not database.token_replica_valido(request.headers.get("X-Replica-Token")):
+        return jsonify(error="No autorizado"), 403
+    datos = request.get_json(silent=True) or {}
+    try:
+        database.aplicar_operaciones_recibidas(datos.get("operaciones"))
+    except (ValueError, sqlite3.Error) as e:
+        return jsonify(error=str(e)), 400
+    return jsonify(ok=True)
+
+
+@app.route("/api/replica/completa", methods=["POST"])
+def api_replica_completa():
+    if not database.token_replica_valido(request.headers.get("X-Replica-Token")):
+        return jsonify(error="No autorizado"), 403
+    try:
+        database.importar_tablas(request.get_json(silent=True))
+    except (ValueError, TypeError, AttributeError, sqlite3.Error) as e:
+        return jsonify(error=str(e)), 400
+    return jsonify(ok=True)
 
 
 if __name__ == "__main__":

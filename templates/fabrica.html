@@ -12,6 +12,12 @@
     <a class="btn" href="{{ url_for('fabrica_nueva', tipo='COMBO') }}">+ Nuevo combo</a>
     <a class="btn btn-secondary" href="{{ url_for('fabrica_nueva', tipo='DUO') }}">+ Combo de 2 pizzas</a>
     <a class="btn btn-secondary" href="{{ url_for('fabrica_nueva', tipo='PIZZA') }}">+ Nueva pizza</a>
+    {% if replicas_remotas %}
+      <form method="POST" action="{{ url_for('fabrica_sincronizar_replica') }}" class="replica-sync">
+        <button type="submit" class="btn btn-secondary"
+          title="Réplicas: {{ replicas_remotas|join(', ') }}">⟳ Sincronizar réplica{{ 's' if replicas_remotas|length > 1 }}</button>
+      </form>
+    {% endif %}
   </div>
 </div>
 

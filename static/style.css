@@ -355,6 +355,7 @@ nav a:hover::after, nav a.active::after { transform: scaleX(1); }
 .type-option small { color: var(--muted); font-weight: 500; }
 .type-option:has(input:checked) { border-color: var(--green); background: #edf4ee; box-shadow: 0 0 0 3px rgb(36 77 59 / 10%); }
 .catalog-actions { flex-wrap: wrap; }
+.replica-sync { margin: 0; }
 .card-bottom { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .precio { color: var(--green); font-size: 1.25rem; font-weight: 700; }
 .muted { color: var(--muted); font-size: .92rem; }

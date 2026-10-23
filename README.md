@@ -73,9 +73,8 @@ python -m unittest discover -s tests -v
 Las pruebas usan bases SQLite temporales y simulan el correo para no enviar mensajes reales.
 La tarea de VS Code **Iniciar app Flask** abre la vista local en `http://127.0.0.1:5005`.
 
-La base `db_replica.sqlite3` simula una réplica relacional; no se conecta automáticamente a una
-máquina virtual remota. Para una réplica entre equipos, hay que configurar y desplegar un servidor
-de base de datos accesible desde ambas máquinas.
+Sin configuración adicional, la réplica es el archivo `db_replica.sqlite3` en la misma carpeta.
+Para que la réplica sea una **máquina virtual** en la red (una o varias), ver la sección 4.
 
 ### Configurar el correo real
 El envío ya está configurado para Gmail con la cuenta `candanedoangel@gmail.com` (en `utils.py`).
@@ -189,16 +188,84 @@ ssh usuario@172.20.10.100
 ```
 
 ## 4. Replicación de datos
-`database.py` implementa `replicate_write()`: toda escritura de **pedidos** y **pagos** se
-ejecuta primero en `db_local.sqlite3` y luego se replica automáticamente en
-`db_replica.sqlite3` (que en el escenario real correría en la máquina virtual/sucursal).
-Si la réplica falla, el pedido/pago igual queda guardado localmente y se muestra una
-advertencia (no se pierde la transacción).
+`database.py` implementa `replicate_write()` / `replicate_transaction()`: toda escritura (pizzas,
+pedidos, productos del pedido, pagos y cobros) se ejecuta primero en la base local y luego se
+replica **con los mismos IDs**. Si la réplica falla, la transacción igual queda guardada localmente
+y se muestra una advertencia (no se pierde nada).
+
+- **Sin `REPLICA_URL`:** la réplica es `db_replica.sqlite3` en la misma computadora.
+- **Con `REPLICA_URL`:** la réplica es una **máquina virtual** (sucursal Veraguas). Cada escritura
+  se envía por HTTP a `/api/replica` de la VM, protegida con la clave compartida `REPLICA_TOKEN`
+  (solo acepta INSERT/UPDATE/DELETE sobre las tablas de la app). Al arrancar, y con el botón
+  **⟳ Sincronizar réplica** de la Fábrica, la PC envía una copia completa a `/api/replica/completa`
+  para ponerla al día si estuvo apagada.
+- **Varias réplicas a la vez:** `REPLICA_URL` admite varias direcciones separadas por coma, p. ej.
+  tu VM y la de tu compañera: `REPLICA_URL=http://192.168.56.101:5000,http://100.x.x.x:5000`.
+  Cada escritura se manda a todas; si una está apagada, el pedido igual se guarda y el aviso nombra
+  solo la que falló.
+
+> No se comparte el archivo `.sqlite3` por una carpeta de red: SQLite no admite escrituras de
+> dos equipos sobre el mismo archivo y la base se podría dañar.
+
+### Preparar la máquina virtual (VirtualBox + Ubuntu)
+> Recomendado: **Ubuntu Server 24.04 LTS**. Si está en tu propia PC, la red más simple es
+> **Adaptador puente** o **Host-only**; si está en la computadora de otra persona, ver más abajo.
+
+1. **Red:** la VM debe tener una IP alcanzable desde la PC. Encenderla, ver su IP con `ip -4 addr`
+   (p. ej. `192.168.56.101`) y comprobar desde la VM que llega a la PC (`ping <IP-de-la-PC>`).
+2. **Instalar y descargar el proyecto** (en la VM):
+   ```bash
+   sudo apt update
+   sudo apt install -y git python3-venv python3-pip
+   git clone https://github.com/lorenacortes2002/Parcial.git chinos_cafe
+   cd chinos_cafe
+   python3 -m venv venv
+   source venv/bin/activate
+   pip install -r requirements.txt gunicorn
+   ```
+3. **Clave compartida:** crear `~/chinos_cafe/.env` en la VM con la **misma** `REPLICA_TOKEN` que
+   tiene el `.env` de la PC (en la VM **no** se pone `REPLICA_URL`):
+   ```
+   REPLICA_TOKEN=la-misma-clave-que-en-la-PC
+   ```
+4. **Arrancar la app en la VM** (escuchando en la red, puerto 5000):
+   ```bash
+   python -c "import database; database.init_db()"
+   sudo ufw allow 5000/tcp        # solo si el firewall ufw está activo
+   gunicorn --workers 2 --bind 0.0.0.0:5000 app:app
+   ```
+   Para dejarla detrás de NGINX en el puerto 80, seguir la sección 2 (y usar `http://IP` en el
+   paso 5).
+5. **En la PC:** en su `.env` agregar la dirección de la VM y reiniciar la app:
+   ```
+   REPLICA_URL=http://192.168.56.101:5000
+   ```
+   Al arrancar, la consola muestra `[REPLICA] Réplica sincronizada con …`, y en la Fábrica aparece
+   el botón **⟳ Sincronizar réplica**.
+6. **Comprobar:** crear un pedido en la PC y abrir `http://192.168.56.101:5000/pedidos` (la página
+   de la VM): el pedido aparece con el mismo número. En la VM también se puede ver con
+   `sqlite3 db_local.sqlite3 "SELECT id, cliente, total FROM pedidos;"`.
+
+**Importante:** la VM es una réplica de consulta. Los pedidos se crean en la PC; lo que se cree
+directamente en la página de la VM se reemplaza en la siguiente sincronización completa.
+
+### Una segunda réplica en la computadora de otra persona (opcional)
+La réplica también puede estar en la VM de otra persona del grupo. Esa VM se prepara igual
+(pasos 2–4, con la misma `REPLICA_TOKEN`), pero su app tiene que ser **alcanzable desde la PC**:
+- **Misma red (casa/router):** la VM usa **Adaptador puente** y la PC la llama por su IP de esa red.
+  En el Wi-Fi de la universidad no suele servir, porque aísla los equipos entre sí.
+- **Redes distintas / universidad:** instalar **Tailscale** (gratis) en la VM y en la PC con la
+  misma cuenta; cada una recibe una IP fija `100.x.x.x` que funciona desde cualquier lugar.
+
+Luego, en el `.env` de la PC, se añaden **las dos** direcciones separadas por coma:
+```
+REPLICA_URL=http://192.168.56.101:5000,http://100.x.x.x:5000
+```
 
 ## 5. Checklist para la sustentación / capturas
 - [ ] Captura de `/fabrica` con al menos 5 pizzas creadas (fecha/hora visible en el reloj del SO)
 - [ ] Captura de `/pedidos` creando un pedido y su JSON en la columna `pedidos.json_pedido`
-- [ ] Captura de `db_local.sqlite3` y `db_replica.sqlite3` mostrando el mismo registro (ej. con DB Browser for SQLite)
+- [ ] Captura del mismo pedido en la PC y en la máquina virtual (misma data en ambas bases)
 - [ ] Captura de `/pagos` confirmando un pago y su JSON en la columna `pagos.json_pago`
 - [ ] Captura de NGINX corriendo (`systemctl status nginx`) y el sitio accesible por IP
 - [ ] Captura del `knockd` en acción (puerto cerrado → knock → puerto abierto → SSH exitoso)

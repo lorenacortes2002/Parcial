@@ -802,6 +802,118 @@ class ProjectRequirementsTests(unittest.TestCase):
             [(28.04,)],
         )
 
+    # --- Réplica en la máquina virtual ------------------------------------
+    def _api_headers(self, token="clave-de-prueba"):
+        return {"X-Replica-Token": token}
+
+    def test_replica_api_requires_the_shared_token(self):
+        body = {"operaciones": [{"sql": "UPDATE pizzas SET precio=? WHERE id=?",
+                                 "params": [99.0, 1]}]}
+        with mock.patch.dict("os.environ", {"REPLICA_TOKEN": "clave-de-prueba"}):
+            self.assertEqual(self.client.post("/api/replica", json=body).status_code, 403)
+            self.assertEqual(self.client.post(
+                "/api/replica", json=body, headers=self._api_headers("otra")).status_code, 403)
+            ok = self.client.post("/api/replica", json=body, headers=self._api_headers())
+            self.assertEqual(ok.status_code, 200)
+        self.assertEqual(
+            self._rows(self.local_path, "SELECT precio FROM pizzas WHERE id=1"), [(99.0,)]
+        )
+        # Sin REPLICA_TOKEN configurado en la VM, la ruta queda cerrada.
+        with mock.patch.dict("os.environ", {"REPLICA_TOKEN": ""}):
+            self.assertEqual(self.client.post(
+                "/api/replica", json=body, headers=self._api_headers("")).status_code, 403)
+
+    def test_replica_api_rejects_unsafe_operations(self):
+        with mock.patch.dict("os.environ", {"REPLICA_TOKEN": "clave-de-prueba"}):
+            for sql in ("DROP TABLE pizzas", "SELECT * FROM pizzas",
+                        "DELETE FROM sqlite_master", "UPDATE pizzas SET precio=1; DROP TABLE pagos"):
+                with self.subTest(sql=sql):
+                    response = self.client.post(
+                        "/api/replica", headers=self._api_headers(),
+                        json={"operaciones": [{"sql": sql, "params": []}]},
+                    )
+                    self.assertEqual(response.status_code, 400)
+        self.assertGreater(self._rows(self.local_path, "SELECT COUNT(*) FROM pizzas")[0][0], 0)
+
+    def test_remote_replication_sends_writes_with_the_same_ids(self):
+        enviados = []
+        with mock.patch.dict("os.environ", {"REPLICA_URL": "http://vm-veraguas"}), \
+                mock.patch.object(database, "_enviar_a_replica",
+                                  side_effect=lambda url, ruta, datos: enviados.append((url, ruta, datos))):
+            self.client.post("/fabrica/nueva", data={
+                "tipo": "PIZZA", "nombre": "Pizza remota", "ingredientes": ["pepperoni"],
+                "precio": "6.00",
+            })
+        pizza_id = self._rows(
+            self.local_path, "SELECT id FROM pizzas WHERE nombre='Pizza remota'"
+        )[0][0]
+        self.assertEqual(len(enviados), 1)
+        url, ruta, datos = enviados[0]
+        self.assertEqual((url, ruta), ("http://vm-veraguas", "/api/replica"))
+        operacion = datos["operaciones"][0]
+        self.assertIn("INSERT INTO pizzas", operacion["sql"])
+        self.assertEqual(operacion["params"][-1], pizza_id)  # mismo id que en la PC
+        # Con réplica remota no se toca el archivo local de réplica.
+        self.assertEqual(
+            self._rows(self.replica_path, "SELECT id FROM pizzas WHERE nombre='Pizza remota'"), []
+        )
+
+    def test_several_replicas_each_receive_the_writes(self):
+        # Dos VMs: la tuya y la de Lorena (REPLICA_URL separadas por coma).
+        enviados = []
+        urls = "http://vm-angel:5000, http://vm-lorena:5000"
+        with mock.patch.dict("os.environ", {"REPLICA_URL": urls}), \
+                mock.patch.object(database, "_enviar_a_replica",
+                                  side_effect=lambda url, ruta, datos: enviados.append(url)):
+            self.client.post("/fabrica/nueva", data={
+                "tipo": "PIZZA", "nombre": "Pizza doble", "ingredientes": ["pepperoni"],
+                "precio": "6.00",
+            })
+        self.assertEqual(enviados, ["http://vm-angel:5000", "http://vm-lorena:5000"])
+
+    def test_order_is_kept_locally_when_a_virtual_machine_is_down(self):
+        # La VM de Angel responde; la de Lorena está caída.
+        def responder(url, ruta, datos):
+            if "lorena" in url:
+                raise database.ErrorReplica(f"no se pudo conectar con {url} (timed out)")
+        with mock.patch.dict("os.environ", {"REPLICA_URL": "http://vm-angel,http://vm-lorena"}), \
+                mock.patch.object(database, "_enviar_a_replica", side_effect=responder):
+            response = self.client.post("/pedidos", data={
+                "cliente": "Ana", "correo_cliente": "ana@example.com", "pizza_id": "1",
+                "cantidad": "1", "retiro_o_flete": "RETIRO EN SITIO", "refresco_cantidad": "0",
+            }, follow_redirects=True)
+        self.assertIn("falló la réplica".encode(), response.data)
+        self.assertIn(b"vm-lorena", response.data)
+        self.assertNotIn(b"vm-angel", response.data)  # la que sí respondió no se nombra
+        self.assertEqual(self._rows(self.local_path, "SELECT COUNT(*) FROM pedidos")[0][0], 1)
+
+    def test_full_sync_copies_every_table_to_the_virtual_machine(self):
+        self.client.post("/pedidos", data={
+            "cliente": "Ana", "correo_cliente": "ana@example.com", "pizza_id": "1",
+            "cantidad": "2", "retiro_o_flete": "RETIRO EN SITIO", "refresco_cantidad": "0",
+        })
+        copia = database.exportar_tablas()
+        # Simula una VM desactualizada y le envía la copia completa por la API.
+        conn = sqlite3.connect(self.local_path)
+        with conn:
+            conn.execute("DELETE FROM pedido_items")
+            conn.execute("DELETE FROM pedidos")
+            conn.execute("UPDATE pizzas SET precio=1")
+        conn.close()
+        with mock.patch.dict("os.environ", {"REPLICA_TOKEN": "clave-de-prueba"}):
+            bad = self.client.post("/api/replica/completa", headers=self._api_headers(),
+                                   json={"pizzas": copia["pizzas"]})
+            self.assertEqual(bad.status_code, 400)
+            ok = self.client.post("/api/replica/completa", headers=self._api_headers(), json=copia)
+            self.assertEqual(ok.status_code, 200)
+        self.assertEqual(database.exportar_tablas(), copia)
+
+    def test_sync_button_reports_when_no_virtual_machine_is_configured(self):
+        with mock.patch.dict("os.environ", {"REPLICA_URL": ""}):
+            self.assertNotIn(b"Sincronizar r", self.client.get("/fabrica").data)
+            response = self.client.post("/fabrica/sincronizar-replica", follow_redirects=True)
+        self.assertIn(b"REPLICA_URL", response.data)
+
     def test_unknown_yappy_code_is_handled(self):
         self.assertEqual(self.client.get("/yappy/pagar/CC-NOPE00").status_code, 404)
         self.assertEqual(

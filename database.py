@@ -3,8 +3,10 @@ database.py
 -------------------------------------------------
 Maneja la conexión a DOS bases de datos SQLite:
   - db_local.sqlite3   -> Base de datos RELACIONAL local (Sede principal, Chiriquí)
-  - db_replica.sqlite3 -> Base de datos RELACIONAL de réplica (simula la
-                           "Máquina Virtual" de la sucursal de Veraguas)
+  - Réplica            -> por defecto db_replica.sqlite3 en la misma carpeta; si se
+                          define REPLICA_URL (p. ej. http://192.168.1.50), la réplica
+                          es la base de la MÁQUINA VIRTUAL de la sucursal de Veraguas,
+                          que recibe cada escritura por la red (ver /api/replica).
 
 Toda operación de escritura (INSERT/UPDATE/DELETE) sobre pedidos y pagos
 se realiza primero en la base LOCAL y luego se REPLICA en la base de
@@ -15,13 +17,47 @@ el examen (control de errores en los campos / operaciones).
 -------------------------------------------------
 """
 
-import sqlite3
+import hmac
+import json
 import os
 import re
+import sqlite3
+import urllib.error
+import urllib.request
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_LOCAL_PATH = os.path.join(BASE_DIR, "db_local.sqlite3")
 DB_REPLICA_PATH = os.path.join(BASE_DIR, "db_replica.sqlite3")
+
+# Tablas que se replican, en orden de dependencias (las referenciadas primero).
+TABLAS_REPLICADAS = ("pizzas", "pedidos", "pedido_items", "pagos", "cobros_yappy")
+TIMEOUT_REPLICA = 5  # segundos de espera máxima a la máquina virtual
+
+
+class ErrorReplica(Exception):
+    """La máquina virtual de réplica no respondió o rechazó la operación."""
+
+
+def replicas_remotas():
+    """
+    Lista de máquinas virtuales de réplica, desde REPLICA_URL (separadas por
+    coma). Vacía = la réplica es el archivo db_replica.sqlite3 local.
+    Ej.: REPLICA_URL=http://192.168.56.101:5000,http://100.64.1.2:5000
+    """
+    crudo = os.environ.get("REPLICA_URL", "")
+    return [url.strip().rstrip("/") for url in crudo.split(",") if url.strip()]
+
+
+def replica_remota_url():
+    """Primera réplica remota configurada (o cadena vacía); útil para mostrarla."""
+    remotas = replicas_remotas()
+    return remotas[0] if remotas else ""
+
+
+def token_replica_valido(recibido):
+    """Compara la clave compartida entre la PC y la máquina virtual."""
+    esperado = os.environ.get("REPLICA_TOKEN", "")
+    return bool(esperado) and hmac.compare_digest(esperado, recibido or "")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS pizzas (
@@ -168,7 +204,8 @@ def get_replica_conn():
 
 def init_db():
     """Crea las tablas en AMBAS bases de datos (local y réplica) si no existen."""
-    for path in (DB_LOCAL_PATH, DB_REPLICA_PATH):
+    remotas = replicas_remotas()
+    for path in (DB_LOCAL_PATH,) if remotas else (DB_LOCAL_PATH, DB_REPLICA_PATH):
         conn = None
         try:
             conn = _connect(path)
@@ -253,6 +290,12 @@ def init_db():
         pizzas = conn.execute("SELECT * FROM pizzas ORDER BY id").fetchall()
         conn.close()
 
+        if remotas:
+            # Cada máquina virtual recibe una copia completa de los datos al arrancar.
+            for ok, mensaje in sincronizar_replicas_remotas():
+                print(f"[REPLICA] {mensaje}" if ok else f"[AVISO REPLICA] {mensaje}")
+            return
+
         replica_conn = get_replica_conn()
         try:
             with replica_conn:
@@ -288,7 +331,6 @@ def init_db():
 def replicate_transaction(operations):
     """Aplica un grupo de escrituras en ambas bases; conserva IDs al replicar inserts."""
     local_conn = None
-    replica_conn = None
     local_ids = []
     try:
         local_conn = get_local_conn()
@@ -306,35 +348,10 @@ def replicate_transaction(operations):
             local_conn.close()
 
     try:
-        replica_conn = get_replica_conn()
-        with replica_conn:
-            for operation_index, (sql, params) in enumerate(operations):
-                replica_sql = sql
-                replica_params = params
-                match = re.match(
-                    r"^(\s*INSERT\s+INTO\s+[A-Za-z_]\w*\s*)"
-                    r"\(([^)]+)\)(\s*VALUES\s*)\(([^)]+)\)",
-                    sql,
-                    flags=re.IGNORECASE,
-                )
-                if match and "id" not in {
-                    column.strip().lower() for column in match.group(2).split(",")
-                }:
-                    replica_sql = (
-                        f"{match.group(1)}({match.group(2)}, id)"
-                        f"{match.group(3)}({match.group(4)}, ?)"
-                        f"{sql[match.end():]}"
-                    )
-                    replica_params = (*params, local_ids[operation_index])
-                replica_conn.execute(replica_sql, replica_params)
-    except sqlite3.Error as e:
-        if replica_conn is not None:
-            replica_conn.rollback()
+        _aplicar_en_replica(_operaciones_para_replica(operations, local_ids))
+    except (sqlite3.Error, ErrorReplica) as e:
         print(f"[ERROR DB REPLICA] {e}")
         return True, local_ids, f"Guardado local OK, pero falló la réplica: {e}"
-    finally:
-        if replica_conn is not None:
-            replica_conn.close()
 
     return True, local_ids, None
 
@@ -347,3 +364,186 @@ def replicate_write(sql, params):
     ok, last_ids, error = replicate_transaction([(sql, params)])
     last_id = last_ids[0] if last_ids else None
     return ok, last_id, error
+
+
+# ----------------------------------------------------------------------
+# Réplica: armado de operaciones, envío a la máquina virtual y recepción
+# ----------------------------------------------------------------------
+def _operaciones_para_replica(operations, local_ids):
+    """
+    Prepara las sentencias para la réplica. A los INSERT se les agrega el id
+    asignado en la base local, para que ambas bases conserven los mismos IDs.
+    """
+    resultado = []
+    for operation_index, (sql, params) in enumerate(operations):
+        replica_sql, replica_params = sql, tuple(params)
+        match = re.match(
+            r"^(\s*INSERT\s+INTO\s+[A-Za-z_]\w*\s*)"
+            r"\(([^)]+)\)(\s*VALUES\s*)\(([^)]+)\)",
+            sql,
+            flags=re.IGNORECASE,
+        )
+        if match and "id" not in {
+            column.strip().lower() for column in match.group(2).split(",")
+        }:
+            replica_sql = (
+                f"{match.group(1)}({match.group(2)}, id)"
+                f"{match.group(3)}({match.group(4)}, ?)"
+                f"{sql[match.end():]}"
+            )
+            replica_params = (*params, local_ids[operation_index])
+        resultado.append((replica_sql, replica_params))
+    return resultado
+
+
+def _aplicar_en_replica(operaciones):
+    """
+    Aplica las operaciones en la réplica. Con una o más máquinas virtuales
+    configuradas, se envía a todas; si alguna falla, se informa nombrándola
+    (el guardado local ya se hizo). Sin VMs, se escribe en el archivo local.
+    """
+    destinos = replicas_remotas()
+    if destinos:
+        cuerpo = {
+            "operaciones": [{"sql": sql, "params": list(params)} for sql, params in operaciones]
+        }
+        errores = []
+        for url in destinos:
+            try:
+                _enviar_a_replica(url, "/api/replica", cuerpo)
+            except ErrorReplica as e:
+                errores.append(str(e))
+        if errores:
+            raise ErrorReplica("; ".join(errores))
+        return
+    replica_conn = None
+    try:
+        replica_conn = get_replica_conn()
+        with replica_conn:
+            for sql, params in operaciones:
+                replica_conn.execute(sql, params)
+    finally:
+        if replica_conn is not None:
+            replica_conn.close()
+
+
+def _enviar_a_replica(url, ruta, datos):
+    """Envía un JSON a una máquina virtual de réplica (con la clave compartida)."""
+    peticion = urllib.request.Request(
+        url + ruta,
+        data=json.dumps(datos).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "X-Replica-Token": os.environ.get("REPLICA_TOKEN", ""),
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(peticion, timeout=TIMEOUT_REPLICA) as respuesta:
+            return json.loads(respuesta.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        try:
+            detalle = json.loads(e.read()).get("error", e.reason)
+        except ValueError:
+            detalle = e.reason
+        raise ErrorReplica(f"{url} respondió {e.code}: {detalle}") from e
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        raise ErrorReplica(f"no se pudo conectar con {url} ({e})") from e
+
+
+_SQL_REPLICABLE = re.compile(
+    r"^\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+([A-Za-z_]\w*)\b", re.IGNORECASE
+)
+
+
+def aplicar_operaciones_recibidas(operaciones):
+    """
+    (En la máquina virtual) Aplica en su base las escrituras recibidas de la PC.
+    Solo acepta INSERT/UPDATE/DELETE de una sentencia sobre las tablas de la app.
+    """
+    if not isinstance(operaciones, list) or not operaciones:
+        raise ValueError("No se recibieron operaciones.")
+    validadas = []
+    for operacion in operaciones:
+        sql = operacion.get("sql") if isinstance(operacion, dict) else None
+        params = operacion.get("params", []) if isinstance(operacion, dict) else None
+        match = _SQL_REPLICABLE.match(sql or "")
+        if not match or match.group(1).lower() not in TABLAS_REPLICADAS or ";" in sql:
+            raise ValueError("Operación no permitida en la réplica.")
+        if not isinstance(params, list) or not all(
+            isinstance(v, (str, int, float)) or v is None for v in params
+        ):
+            raise ValueError("Parámetros no válidos en la réplica.")
+        validadas.append((sql, params))
+
+    conn = get_local_conn()
+    try:
+        with conn:
+            for sql, params in validadas:
+                conn.execute(sql, params)
+    finally:
+        conn.close()
+
+
+def exportar_tablas():
+    """Copia completa de las tablas replicadas de la base local."""
+    conn = get_local_conn()
+    try:
+        datos = {}
+        for tabla in TABLAS_REPLICADAS:
+            cursor = conn.execute(f"SELECT * FROM {tabla} ORDER BY id")
+            datos[tabla] = {
+                "columnas": [c[0] for c in cursor.description],
+                "filas": [list(fila) for fila in cursor.fetchall()],
+            }
+        return datos
+    finally:
+        conn.close()
+
+
+def importar_tablas(datos):
+    """
+    (En la máquina virtual) Reemplaza su contenido por la copia recibida de la PC.
+    Las columnas se validan contra el esquema real antes de usarlas.
+    """
+    if not isinstance(datos, dict) or set(datos) != set(TABLAS_REPLICADAS):
+        raise ValueError("La copia recibida no tiene todas las tablas esperadas.")
+    conn = get_local_conn()
+    try:
+        with conn:
+            for tabla in reversed(TABLAS_REPLICADAS):
+                conn.execute(f"DELETE FROM {tabla}")
+            for tabla in TABLAS_REPLICADAS:
+                validas = {fila["name"] for fila in conn.execute(f"PRAGMA table_info({tabla})")}
+                columnas = datos[tabla].get("columnas", [])
+                if not columnas or not set(columnas) <= validas:
+                    raise ValueError(f"Columnas no válidas para la tabla {tabla}.")
+                lista = ", ".join(f'"{c}"' for c in columnas)
+                marcas = ", ".join("?" for _ in columnas)
+                for fila in datos[tabla].get("filas", []):
+                    conn.execute(f"INSERT INTO {tabla} ({lista}) VALUES ({marcas})", fila)
+    finally:
+        conn.close()
+
+
+def sincronizar_replicas_remotas():
+    """
+    Envía a cada máquina virtual una copia completa de la base local.
+    Devuelve una lista de (ok, mensaje), una por réplica.
+    """
+    destinos = replicas_remotas()
+    if not destinos:
+        return [(False, "No hay máquinas virtuales de réplica configuradas (REPLICA_URL).")]
+    try:
+        datos = exportar_tablas()
+    except sqlite3.Error as e:
+        return [(False, f"No se pudo leer la base local: {e}")]
+    total = sum(len(t["filas"]) for t in datos.values())
+    resultados = []
+    for url in destinos:
+        try:
+            _enviar_a_replica(url, "/api/replica/completa", datos)
+            resultados.append((True, f"Réplica sincronizada con {url} ({total} registros)."))
+        except ErrorReplica as e:
+            resultados.append((False, f"No se pudo sincronizar {url}: {e}"))
+    return resultados
