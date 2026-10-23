@@ -12,6 +12,7 @@
   --tomato: #c95538;
   --gold: #e4b75e;
   --shadow: 0 16px 40px rgb(41 37 29 / 8%);
+  --motion-ease: cubic-bezier(.2, .7, .25, 1);
 }
 
 * { box-sizing: border-box; }
@@ -20,7 +21,9 @@ body {
   min-width: 320px;
   margin: 0;
   color: var(--ink);
-  background: var(--paper);
+  background:
+    radial-gradient(ellipse at 8% 2%, rgb(228 183 94 / 8%), transparent 28rem),
+    var(--paper);
   font-family: "DM Sans", "Segoe UI", sans-serif;
   line-height: 1.6;
 }
@@ -61,7 +64,9 @@ button, input, select, textarea { font: inherit; }
   border-radius: 50%;
   color: var(--gold);
   font-size: 1.25rem;
+  transition: transform .45s var(--motion-ease), box-shadow .3s ease;
 }
+.brand:hover .brand-mark { transform: rotate(-12deg); box-shadow: 0 0 0 5px rgb(255 255 255 / 8%); }
 
 .brand-name { display: block; line-height: 1.15; }
 .brand-subtitle {
@@ -75,6 +80,7 @@ button, input, select, textarea { font: inherit; }
 
 nav { display: flex; flex-wrap: wrap; gap: 6px; }
 nav a {
+  position: relative;
   padding: 9px 13px;
   border-radius: 999px;
   color: #dce6dc;
@@ -83,13 +89,26 @@ nav a {
   text-decoration: none;
   transition: background-color .2s ease, color .2s ease, transform .2s ease;
 }
+nav a::after {
+  position: absolute;
+  right: 13px;
+  bottom: 5px;
+  left: 13px;
+  height: 1px;
+  background: var(--gold);
+  content: "";
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform .28s var(--motion-ease);
+}
 nav a:hover, nav a.active { color: #fff; background: rgb(255 255 255 / 13%); }
 nav a:hover { transform: translateY(-1px); }
+nav a:hover::after, nav a.active::after { transform: scaleX(1); }
 
 .container { width: min(1120px, calc(100% - 48px)); margin: 48px auto 72px; }
-main.container { animation: content-enter .55s cubic-bezier(.2, .7, .25, 1) both; }
 .hero {
   position: relative;
+  isolation: isolate;
   display: flex;
   min-height: 300px;
   align-items: center;
@@ -104,6 +123,32 @@ main.container { animation: content-enter .55s cubic-bezier(.2, .7, .25, 1) both
     radial-gradient(circle at 82% 45%, rgb(228 183 94 / 17%) 0 16%, transparent 16.2%),
     radial-gradient(circle at 82% 45%, rgb(255 255 255 / 8%) 0 25%, transparent 25.2%),
     linear-gradient(115deg, #193a2b, #2d5942);
+  background-size: 100% 100%, 100% 100%, 140% 140%;
+  animation: hero-light 14s ease-in-out infinite alternate;
+}
+.hero::before {
+  position: absolute;
+  z-index: 0;
+  top: -48%;
+  right: 8%;
+  width: clamp(280px, 38vw, 440px);
+  aspect-ratio: 1;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 50%;
+  box-shadow: 0 0 0 28px rgb(255 255 255 / 2%), 0 0 0 58px rgb(255 255 255 / 2%);
+  content: "";
+  pointer-events: none;
+  animation: halo-drift 12s ease-in-out infinite;
+}
+.hero::after {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 35%, rgb(255 255 255 / 5%) 49%, transparent 63%);
+  content: "";
+  pointer-events: none;
+  transform: translateX(-100%);
+  animation: hero-sheen 9s 1.2s ease-in-out infinite;
 }
 
 .hero-copy { position: relative; z-index: 1; max-width: 600px; }
@@ -128,6 +173,7 @@ main.container { animation: content-enter .55s cubic-bezier(.2, .7, .25, 1) both
   place-items: center;
   transform: rotate(-9deg);
   animation: hero-float 7s ease-in-out 1s infinite;
+  filter: drop-shadow(0 14px 16px rgb(0 0 0 / 12%));
 }
 
 .hero-art::before, .pizza-art::before {
@@ -151,6 +197,9 @@ main.container { animation: content-enter .55s cubic-bezier(.2, .7, .25, 1) both
 }
 
 .hero-art::before {
+  display: none;
+  position: relative;
+  z-index: 1;
   width: 92%;
   border-width: 16px;
   background-image:
@@ -163,18 +212,43 @@ main.container { animation: content-enter .55s cubic-bezier(.2, .7, .25, 1) both
     radial-gradient(circle at 70% 76%, #f7e7bb 0 11px, transparent 11.8px),
     radial-gradient(circle at 34% 48%, #426444 0 4px, transparent 4.8px),
     radial-gradient(circle at 58% 53%, #426444 0 4px, transparent 4.8px);
+  animation: pizza-turn 28s linear infinite;
+}
+
+.pizza-slice-lines {
+  display: none;
+  position: absolute;
+  z-index: 2;
+  width: 92%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: repeating-conic-gradient(
+    from -22.5deg,
+    rgb(255 246 218 / 96%) 0deg 1.3deg,
+    transparent 1.3deg 45deg
+  );
+  mask: radial-gradient(circle, transparent 0 5%, #000 8% 100%);
+  pointer-events: none;
+}
+
+.hero-art .pizza-slice-lines {
+  animation: pizza-turn 28s linear infinite;
 }
 
 .hero-art::after {
+  display: none;
   position: absolute;
-  right: 0;
-  bottom: 6%;
-  width: 30%;
-  height: 30%;
-  border: 1px solid rgb(255 255 255 / 40%);
+  z-index: 3;
+  right: 8%;
+  bottom: 10%;
+  width: 17%;
+  height: 17%;
+  border: 3px solid #d49a53;
   border-radius: 50%;
-  background: rgb(255 255 255 / 9%);
+  background: radial-gradient(circle at 35% 30%, #ec8062, #bd442e 70%);
+  box-shadow: 0 0 0 5px rgb(255 255 255 / 12%), 0 5px 12px rgb(0 0 0 / 15%);
   content: "";
+  animation: pepperoni-orbit 8s ease-in-out infinite;
 }
 
 .page-heading { margin: 0 0 28px; }
@@ -210,63 +284,38 @@ main.container { animation: content-enter .55s cubic-bezier(.2, .7, .25, 1) both
   border-radius: 18px;
   background: var(--surface);
   box-shadow: 0 5px 18px rgb(41 37 29 / 4%);
-  animation: content-enter .5s cubic-bezier(.2, .7, .25, 1) both;
-  transition: transform .28s cubic-bezier(.2, .7, .25, 1), box-shadow .28s ease, border-color .28s ease;
+  transition: transform .4s var(--motion-ease), box-shadow .4s ease, border-color .4s ease;
 }
-.card:nth-child(2) { animation-delay: 70ms; }
-.card:nth-child(3) { animation-delay: 140ms; }
-.card:nth-child(4) { animation-delay: 210ms; }
-.card:nth-child(5) { animation-delay: 280ms; }
-.card:hover { transform: translateY(-5px); border-color: #d8cfbd; box-shadow: var(--shadow); }
+.card:hover { transform: translateY(-7px) scale(1.012); border-color: #d8cfbd; box-shadow: var(--shadow); }
 .pizza-art {
   position: relative;
+  isolation: isolate;
   display: grid;
   min-height: 190px;
   place-items: center;
   overflow: hidden;
   background: radial-gradient(ellipse at center, #f5eee0, #f8f5ee 68%);
 }
-.pizza-art::before { position: relative; z-index: 1; transition: transform .25s ease; }
-.card:hover .pizza-art::before { transform: rotate(5deg) scale(1.035); }
-.pizza-art--1::before {
-  background-color: #ead09a;
-  background-image:
-    radial-gradient(circle at 26% 28%, #b84735 0 5px, transparent 5.8px),
-    radial-gradient(circle at 63% 24%, #dbb96d 0 8px, transparent 8.8px),
-    radial-gradient(circle at 76% 53%, #426444 0 5px, transparent 5.8px),
-    radial-gradient(circle at 47% 68%, #dbb96d 0 8px, transparent 8.8px),
-    radial-gradient(circle at 27% 68%, #b84735 0 5px, transparent 5.8px),
-    radial-gradient(circle at 46% 43%, #f7e7bb 0 9px, transparent 9.8px);
+.pizza-art::before, .pizza-art::after, .pizza-art .pizza-slice-lines { display: none; }
+.pizza-illustration {
+  width: 72%;
+  aspect-ratio: 1;
+  overflow: visible;
+  filter: drop-shadow(0 13px 10px rgb(83 53 25 / 24%));
 }
-.pizza-art--2::before {
-  background-color: #edc873;
-  background-image:
-    radial-gradient(circle at 26% 28%, #426444 0 5px, transparent 5.8px),
-    radial-gradient(circle at 63% 24%, #426444 0 6px, transparent 6.8px),
-    radial-gradient(circle at 76% 53%, #4c7149 0 5px, transparent 5.8px),
-    radial-gradient(circle at 47% 68%, #426444 0 6px, transparent 6.8px),
-    radial-gradient(circle at 27% 68%, #426444 0 5px, transparent 5.8px),
-    radial-gradient(circle at 46% 43%, #f7e7bb 0 9px, transparent 9.8px);
+.hero-art .pizza-illustration {
+  width: 96%;
+  animation: pizza-turn 42s linear infinite;
 }
-.pizza-art--3::before {
-  background-color: #eabf68;
-  background-image:
-    radial-gradient(circle at 26% 28%, #a63b2b 0 6px, transparent 6.8px),
-    radial-gradient(circle at 63% 24%, #426444 0 6px, transparent 6.8px),
-    radial-gradient(circle at 76% 53%, #a63b2b 0 5px, transparent 5.8px),
-    radial-gradient(circle at 47% 68%, #426444 0 6px, transparent 6.8px),
-    radial-gradient(circle at 27% 68%, #a63b2b 0 5px, transparent 5.8px),
-    radial-gradient(circle at 46% 43%, #f7e7bb 0 9px, transparent 9.8px);
+.pizza-art .pizza-illustration {
+  width: clamp(155px, 68%, 190px);
+  animation: pizza-breathe 6s ease-in-out infinite;
+  transition: transform .45s var(--motion-ease), filter .45s ease;
 }
-.pizza-art--4::before {
-  background-color: #edcb78;
-  background-image:
-    radial-gradient(circle at 26% 28%, #f7e7bb 0 7px, transparent 7.8px),
-    radial-gradient(circle at 63% 24%, #f7e7bb 0 8px, transparent 8.8px),
-    radial-gradient(circle at 76% 53%, #dbb96d 0 7px, transparent 7.8px),
-    radial-gradient(circle at 47% 68%, #f7e7bb 0 8px, transparent 8.8px),
-    radial-gradient(circle at 27% 68%, #f7e7bb 0 7px, transparent 7.8px),
-    radial-gradient(circle at 46% 43%, #c64e37 0 5px, transparent 5.8px);
+.card:hover .pizza-art .pizza-illustration {
+  animation-play-state: paused;
+  transform: translateY(-5px) rotate(4deg) scale(1.07);
+  filter: drop-shadow(0 18px 13px rgb(83 53 25 / 30%));
 }
 .card-body { padding: 20px; }
 .card h3 { margin: 0 0 7px; font-size: 1.3rem; }
@@ -324,9 +373,9 @@ main.container { animation: content-enter .55s cubic-bezier(.2, .7, .25, 1) both
   font-size: .9rem;
   font-weight: 700;
   text-decoration: none;
-  transition: background-color .2s ease, border-color .2s ease, color .2s ease, box-shadow .2s ease, transform .2s ease;
+  transition: background-color .2s ease, border-color .2s ease, color .2s ease, box-shadow .25s ease, transform .25s var(--motion-ease);
 }
-.btn:hover { transform: translateY(-1px); border-color: var(--green-dark); background: var(--green-dark); }
+.btn:hover { transform: translateY(-2px); border-color: var(--green-dark); background: var(--green-dark); box-shadow: 0 7px 16px rgb(25 58 43 / 17%); }
 .btn:active { transform: translateY(0) scale(.98); }
 .btn-secondary { border-color: var(--line); color: var(--ink); background: transparent; }
 .btn-secondary:hover { border-color: #c9c2b5; color: var(--ink); background: #f2eee5; }
@@ -430,7 +479,7 @@ main.container { animation: content-enter .55s cubic-bezier(.2, .7, .25, 1) both
 .form-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
 .form-note { margin: 0 0 12px; padding: 13px 16px; border-radius: 10px; color: #536357; background: #f1f4ee; font-size: .9rem; }
 
-.alert { margin: 0 0 22px; padding: 13px 17px; border: 1px solid transparent; border-radius: 10px; font-size: .92rem; font-weight: 600; animation: content-enter .35s ease-out both; }
+.alert { margin: 0 0 22px; padding: 13px 17px; border: 1px solid transparent; border-radius: 10px; font-size: .92rem; font-weight: 600; }
 .alert-success { border-color: #d3e4d2; color: #285c39; background: #edf6ec; }
 .alert-danger { border-color: #f0d2cd; color: #843d32; background: #fbefed; }
 .alert-warning { border-color: #eadbb4; color: #745c23; background: #fbf5e4; }
@@ -641,14 +690,52 @@ footer {
   text-align: center;
 }
 
-@keyframes content-enter {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
 @keyframes hero-float {
   0%, 100% { transform: translateY(0) rotate(-9deg); }
   50% { transform: translateY(-7px) rotate(-7deg); }
+}
+
+@keyframes pizza-turn {
+  to { transform: rotate(351deg); }
+}
+
+@keyframes pizza-breathe {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50% { transform: translateY(-7px) rotate(2deg); }
+}
+
+@keyframes pepperoni-orbit {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  25% { transform: translate(-8px, -5px) scale(.94); }
+  50% { transform: translate(-2px, -11px) scale(1.04); }
+  75% { transform: translate(5px, -4px) scale(.96); }
+}
+
+@keyframes hero-light {
+  from { background-position: 0 0, 0 0, 0% 50%; }
+  to { background-position: 0 0, 0 0, 100% 50%; }
+}
+
+@keyframes halo-drift {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(-10px, 8px, 0) scale(1.035); }
+}
+
+@keyframes hero-sheen {
+  0%, 64%, 100% { transform: translateX(-100%); }
+  82% { transform: translateX(100%); }
+}
+
+.motion-ready .reveal {
+  opacity: 0;
+  transform: translateY(30px);
+  transition: opacity .8s var(--motion-ease), transform .8s var(--motion-ease);
+  transition-delay: var(--reveal-delay, 0ms);
+}
+
+.motion-ready .reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 :focus-visible {
@@ -663,6 +750,7 @@ footer {
   .container { width: min(100% - 32px, 560px); margin: 28px auto 48px; }
   .hero { min-height: 260px; margin-bottom: 38px; padding: 32px 25px; }
   .hero-art { position: absolute; right: -28px; bottom: -45px; width: 150px; opacity: .28; }
+  .hero::before { right: -24%; opacity: .55; }
   .hero-copy { max-width: 100%; }
   .hero h1 { font-size: 2.45rem; }
   .section-header { align-items: flex-start; flex-direction: column; }
@@ -679,6 +767,13 @@ footer {
   .tabla th, .tabla td { padding: 11px 12px; }
 }
 
+@media (hover: none) {
+  .card:hover { transform: none; }
+  .card:hover .pizza-art::before { animation-play-state: running; transform: none; }
+  .card:hover .pizza-art .pizza-slice-lines { animation-play-state: running; transform: none; }
+  .card:hover .pizza-art .pizza-illustration { animation-play-state: running; transform: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     scroll-behavior: auto !important;
@@ -686,4 +781,5 @@ footer {
     animation-iteration-count: 1 !important;
     transition-duration: .01ms !important;
   }
+  .motion-ready .reveal { opacity: 1; transform: none; }
 }
