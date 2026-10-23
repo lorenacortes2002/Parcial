@@ -84,7 +84,7 @@ en 2 pasos → Contraseñas de aplicaciones), que **no** se guarda en el código
 `.env` en la carpeta del proyecto (excluido de git). Copiar `.env.example` como `.env` y escribirla
 sin espacios:
 ```
-SMTP_PASS=abcdefghijklmnop
+SMTP_PASS=TU_CONTRASENA_DE_APLICACION
 ```
 La app lee `.env` al arrancar. También se puede definir en la terminal (`$env:SMTP_PASS = "..."` en
 PowerShell o `export SMTP_PASS=...` en Linux), que tiene prioridad sobre `.env`.
