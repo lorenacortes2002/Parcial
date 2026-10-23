@@ -25,12 +25,33 @@ import segno
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_PATH = os.path.join(BASE_DIR, "correos_enviados.log")
 
-# --- Configuración SMTP (editar con los datos reales del servidor) -------
-SMTP_HOST = os.environ.get("SMTP_HOST", "localhost")
-SMTP_PORT = int(os.environ.get("SMTP_PORT", 25))
-SMTP_USER = os.environ.get("SMTP_USER", "")
+def _cargar_env(ruta):
+    """
+    Carga variables KEY=valor del archivo .env (excluido de git) sin pisar
+    las que ya estén definidas en la terminal.
+    """
+    try:
+        with open(ruta, encoding="utf-8") as archivo:
+            for linea in archivo:
+                linea = linea.strip()
+                if not linea or linea.startswith("#") or "=" not in linea:
+                    continue
+                clave, valor = linea.split("=", 1)
+                os.environ.setdefault(clave.strip(), valor.strip().strip('"').strip("'"))
+    except OSError:
+        pass  # sin .env se usan las variables de la terminal o los valores por defecto
+
+
+_cargar_env(os.path.join(BASE_DIR, ".env"))
+
+# --- Configuración SMTP (Gmail) --------------------------------------------
+# La contraseña de aplicación de Gmail NO se escribe aquí: va en el archivo
+# .env (SMTP_PASS=...), que no se sube a GitHub (ver README).
+SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
+SMTP_USER = os.environ.get("SMTP_USER", "candanedoangel@gmail.com")
 SMTP_PASS = os.environ.get("SMTP_PASS", "")
-EMPRESA_CORREO = os.environ.get("EMPRESA_CORREO", "pedidos@chinoscafe.local")
+EMPRESA_CORREO = os.environ.get("EMPRESA_CORREO", "candanedoangel@gmail.com")
 
 # --- Datos del comercio en Yappy (editar con los reales) --------------------
 YAPPY_TELEFONO = os.environ.get("YAPPY_TELEFONO", "6123-4567")
@@ -114,6 +135,11 @@ def enviar_correo(destinatario, asunto, documentos):
                 filename=nombre,
             )
 
+        if SMTP_USER and not SMTP_PASS:
+            # Sin contraseña de aplicación no se intenta conectar a Gmail.
+            raise smtplib.SMTPException(
+                "falta la contraseña de aplicación (variable de entorno SMTP_PASS)"
+            )
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=5) as server:
             if SMTP_USER:
                 server.starttls()

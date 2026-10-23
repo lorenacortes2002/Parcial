@@ -72,16 +72,20 @@ La base `db_replica.sqlite3` simula una réplica relacional; no se conecta autom
 máquina virtual remota. Para una réplica entre equipos, hay que configurar y desplegar un servidor
 de base de datos accesible desde ambas máquinas.
 
-### Configurar el correo real (opcional)
-Definir variables de entorno antes de ejecutar:
-```bash
-export FLASK_SECRET_KEY="una-clave-aleatoria-larga"
-export SMTP_HOST="smtp.gmail.com"
-export SMTP_PORT=587
-export SMTP_USER="tu_correo@gmail.com"
-export SMTP_PASS="tu_password_de_aplicacion"
-export EMPRESA_CORREO="pedidos@chinoscafe.com"
+### Configurar el correo real
+El envío ya está configurado para Gmail con la cuenta `candanedoangel@gmail.com` (en `utils.py`).
+Solo falta la **contraseña de aplicación** de Gmail (Cuenta de Google → Seguridad → Verificación
+en 2 pasos → Contraseñas de aplicaciones), que **no** se guarda en el código: va en un archivo
+`.env` en la carpeta del proyecto (excluido de git). Copiar `.env.example` como `.env` y escribirla
+sin espacios:
 ```
+SMTP_PASS=abcdefghijklmnop
+```
+La app lee `.env` al arrancar. También se puede definir en la terminal (`$env:SMTP_PASS = "..."` en
+PowerShell o `export SMTP_PASS=...` en Linux), que tiene prioridad sobre `.env`.
+Sin `SMTP_PASS` no se intenta enviar y queda registrado en `correos_enviados.log`.
+Para usar otra cuenta o servidor se pueden definir también `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`
+y `EMPRESA_CORREO`, y `FLASK_SECRET_KEY` para conservar el carrito al reiniciar la app.
 Si `FLASK_SECRET_KEY` no está definida, se genera una clave temporal al iniciar la app.
 
 ## 2. Despliegue en el servidor Linux con NGINX (sucursal Veraguas)
