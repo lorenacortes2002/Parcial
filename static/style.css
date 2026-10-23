@@ -651,6 +651,14 @@ nav a:hover::after, nav a.active::after { transform: scaleX(1); }
   .item-footer__total { text-align: right; }
 }
 
+/* --- Página de réplica ---------------------------------------------- */
+.replica-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
+.replica-card { padding: clamp(22px, 3vw, 30px); border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow); }
+.replica-card h2 { display: flex; align-items: center; gap: 10px; margin: 0 0 16px; font-size: 1.45rem; }
+.replica-card .payment-data dd { overflow-wrap: anywhere; }
+.estado--error { color: #843d32; background: #fbefed; }
+@media (max-width: 760px) { .replica-grid { grid-template-columns: 1fr; } }
+
 /* --- Dirección de entrega -------------------------------------------- */
 .form-field--full { grid-column: 1 / -1; }
 .form-field[hidden] { display: none; }

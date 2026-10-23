@@ -20,6 +20,11 @@ class ProjectRequirementsTests(unittest.TestCase):
         self.local_path = root / "local.sqlite3"
         self.replica_path = root / "replica.sqlite3"
 
+        # Estas pruebas usan SQLite aunque el .env local configure MariaDB.
+        motor = mock.patch.dict("os.environ", {"DB_MOTOR": "sqlite"})
+        motor.start()
+        self.addCleanup(motor.stop)
+
         for name, value in (
             ("DB_LOCAL_PATH", str(self.local_path)),
             ("DB_REPLICA_PATH", str(self.replica_path)),
