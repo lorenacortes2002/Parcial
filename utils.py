@@ -142,6 +142,13 @@ def enviar_correo(destinatario, asunto, documentos):
             raise smtplib.SMTPException(
                 "falta la contraseña de aplicación (variable de entorno SMTP_PASS)"
             )
+        # comprobante-pdf-chinos
+        from factura import adjuntar_factura
+        try:
+            adjuntar_factura(msg, documentos)
+        except Exception as error_pdf:
+            raise smtplib.SMTPException("No se pudo generar el comprobante PDF: " + type(error_pdf).__name__) from error_pdf
+
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=5) as server:
             if SMTP_USER:
                 server.starttls()
