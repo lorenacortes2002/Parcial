@@ -49,6 +49,69 @@ REFRESCOS_DISPONIBLES = [
     "Coca-Cola", "Coca-Cola Zero", "Sprite", "Fanta", "Agua", "Ninguno"
 ]
 
+# Sodas del pedido: sabores (sin "Ninguno": para no pedir soda se elige cantidad 0)
+SABORES_SODA = [r for r in REFRESCOS_DISPONIBLES if r != "Ninguno"]
+TAMANOS_SODA = {
+    "LATA 12 OZ": "Lata 12 oz",
+    "BOTELLA 20 OZ": "Botella 20 oz",
+    "1 LITRO": "1 litro",
+    "2 LITROS": "2 litros",
+}
+MAX_SODAS = 20
+
+
+def _sodas_from_form():
+    """
+    Lee cantidad, tamaño y sabores de soda del formulario de pedidos.
+    Devuelve (cantidad, tamaño, [(sabor, cantidad), ...]).
+    """
+    try:
+        cantidad = int(request.form.get("refresco_cantidad", "0") or 0)
+    except ValueError:
+        raise ValueError("La cantidad de sodas debe ser un número entero.")
+    if cantidad < 0 or cantidad > MAX_SODAS:
+        raise ValueError(f"La cantidad de sodas debe estar entre 0 y {MAX_SODAS}.")
+    if cantidad == 0:
+        return 0, None, []
+
+    tamano = request.form.get("refresco_tamano", "")
+    if tamano not in TAMANOS_SODA:
+        raise ValueError("Seleccione un tamaño de soda válido.")
+
+    sabores = request.form.getlist("refrescos")
+    if not sabores:
+        raise ValueError("Seleccione al menos un sabor de soda.")
+    if len(set(sabores)) != len(sabores) or not set(sabores).issubset(SABORES_SODA):
+        raise ValueError("Seleccione sabores de soda válidos y sin duplicados.")
+    if len(sabores) > cantidad:
+        raise ValueError("No puede elegir más sabores que sodas.")
+
+    if len(sabores) == 1:
+        return cantidad, tamano, [(sabores[0], cantidad)]
+
+    detalle = []
+    for sabor in sabores:
+        try:
+            n = int(request.form.get(f"cant_{sabor}", "0"))
+        except ValueError:
+            n = 0
+        if n < 1:
+            raise ValueError(f"Indique cuántas sodas de {sabor} desea (mínimo 1).")
+        detalle.append((sabor, n))
+    if sum(n for _, n in detalle) != cantidad:
+        raise ValueError(
+            f"La suma de sodas por sabor debe ser igual a {cantidad}."
+        )
+    return cantidad, tamano, detalle
+
+
+def _describir_sodas(cantidad, tamano, detalle):
+    if cantidad == 0:
+        return "Ninguno"
+    sabores = ", ".join(f"{n}× {sabor}" for sabor, n in detalle)
+    return f"{sabores} ({TAMANOS_SODA[tamano]})"
+
+
 # Formas de entrega que admite cada pizza (valor guardado -> texto visible).
 ENTREGAS_PIZZA = {
     "AMBOS": "Domicilio y retiro en sitio",
@@ -277,7 +340,6 @@ def pedidos():
             cliente = request.form.get("cliente", "").strip()
             correo_cliente = request.form.get("correo_cliente", "").strip()
             pizza_id = int(request.form.get("pizza_id"))
-            refresco = request.form.get("refresco", "")
             cantidad = int(request.form.get("cantidad", 1))
             retiro_o_flete = request.form.get("retiro_o_flete", "RETIRO EN SITIO")
             direccion = " ".join(request.form.get("direccion", "").split())
@@ -288,8 +350,8 @@ def pedidos():
                 raise ValueError("Indique un correo electrónico válido.")
             if cantidad < 1:
                 raise ValueError("La cantidad debe ser al menos 1.")
-            if refresco not in REFRESCOS_DISPONIBLES:
-                raise ValueError("Seleccione un refresco válido.")
+            sodas_cantidad, sodas_tamano, sodas_detalle = _sodas_from_form()
+            refresco = _describir_sodas(sodas_cantidad, sodas_tamano, sodas_detalle)
             if retiro_o_flete not in ("RETIRO EN SITIO", "FLETE A DOMICILIO"):
                 raise ValueError("Seleccione un método de entrega válido.")
             if retiro_o_flete == "FLETE A DOMICILIO":
@@ -321,9 +383,11 @@ def pedidos():
 
             ok, pedido_id, error = database.replicate_write(
                 "INSERT INTO pedidos (cliente, correo_cliente, pizza_id, refresco, "
+                "refresco_cantidad, refresco_tamano, "
                 "cantidad, total, estado, retiro_o_flete, direccion, fecha) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (cliente, correo_cliente, pizza_id, refresco, cantidad, total,
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (cliente, correo_cliente, pizza_id, refresco,
+                 sodas_cantidad, sodas_tamano, cantidad, total,
                  "CONFIRMADO", retiro_o_flete, direccion, fecha),
             )
             if not ok:
@@ -334,6 +398,11 @@ def pedidos():
             pedido_dict = {
                 "id": pedido_id, "cliente": cliente, "correo_cliente": correo_cliente,
                 "pizza_nombre": pizza["nombre"], "refresco": refresco, "cantidad": cantidad,
+                "refresco_cantidad": sodas_cantidad,
+                "refresco_tamano": TAMANOS_SODA.get(sodas_tamano),
+                "refrescos_detalle": [
+                    {"sabor": sabor, "cantidad": n} for sabor, n in sodas_detalle
+                ],
                 "total": total, "retiro_o_flete": retiro_o_flete,
                 "direccion": direccion, "estado": "CONFIRMADO", "fecha": fecha,
             }
@@ -357,7 +426,8 @@ def pedidos():
 
     return render_template(
         "pedidos.html", pizzas=pizzas, pedidos=lista_pedidos, entregas_pizza=ENTREGAS_PIZZA,
-        refrescos_disponibles=REFRESCOS_DISPONIBLES,
+        sabores_soda=SABORES_SODA, tamanos_soda=TAMANOS_SODA, max_sodas=MAX_SODAS,
+        sabores_elegidos=request.form.getlist("refrescos") if request.method == "POST" else [],
         selected_pizza_id=selected_pizza_id,
         form=request.form if request.method == "POST" else {},
         min_direccion=MIN_DIRECCION, max_direccion=MAX_DIRECCION,

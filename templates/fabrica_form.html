@@ -24,7 +24,7 @@
   </select>
   <small id="ingredient-help" class="ingredient-help">
     <span>Haz clic en un ingrediente para añadirlo y otra vez para quitarlo (no hace falta Ctrl).</span>
-    <strong id="ingredient-count">0 / {{ max_ing }}</strong>
+    <strong id="ingredient-count" class="pick-count">0 / {{ max_ing }}</strong>
   </small>
   <p id="ingredient-summary" class="ingredient-summary" aria-live="polite"></p>
 
@@ -55,5 +55,6 @@
 </div>
 {% endblock %}
 {% block scripts %}
+<script src="{{ url_for('static', filename='click-select.js') }}" defer></script>
 <script src="{{ url_for('static', filename='ingredients.js') }}" defer></script>
 {% endblock %}

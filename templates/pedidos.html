@@ -23,21 +23,13 @@
       <label for="pizza-id">Pizza (combo)</label>
       <select id="pizza-id" name="pizza_id" required aria-describedby="pizza-help">
         {% for p in pizzas %}
-          <option value="{{ p.id }}" data-price="{{ p.precio }}" data-entrega="{{ p.entrega }}"
+          <option value="{{ p.id }}" data-price="{{ p.precio }}" data-entrega="{{ p.entrega }}" data-refresco="{{ p.refresco }}"
             {% if p.id == selected_pizza_id %}selected{% endif %}>
             {{ p.nombre }} — ${{ "%.2f"|format(p.precio) }}
           </option>
         {% endfor %}
       </select>
       <small id="pizza-help">Elige uno de nuestros combos recién preparados.</small>
-    </div>
-    <div class="form-field">
-      <label for="refresco">Refresco</label>
-      <select id="refresco" name="refresco">
-        {% for r in refrescos_disponibles %}
-          <option value="{{ r }}">{{ r }}</option>
-        {% endfor %}
-      </select>
     </div>
     <div class="form-field">
       <label for="cantidad">Cantidad</label>
@@ -61,6 +53,52 @@
         aria-describedby="direccion-help">{{ form.get('direccion', '') }}</textarea>
       <small id="direccion-help">Incluye barrio, calle, número de casa o apartamento y un punto de referencia.</small>
     </div>
+
+    <fieldset class="form-field form-field--full soda-picker" id="soda-picker">
+      <legend>Sodas</legend>
+      <div class="form-grid">
+        <div class="form-field">
+          <label for="refresco-cantidad">Cantidad de sodas</label>
+          <input id="refresco-cantidad" type="number" name="refresco_cantidad"
+            min="0" max="{{ max_sodas }}" value="{{ form.get('refresco_cantidad', 1) }}" required
+            aria-describedby="refresco-cantidad-help">
+          <small id="refresco-cantidad-help">Pon 0 si no deseas soda.</small>
+        </div>
+        <div class="form-field soda-detail">
+          <label for="refresco-tamano">Tamaño</label>
+          <select id="refresco-tamano" name="refresco_tamano">
+            {% for valor, texto in tamanos_soda.items() %}
+              <option value="{{ valor }}" {% if form.get('refresco_tamano') == valor %}selected{% endif %}>{{ texto }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-field form-field--full soda-detail">
+          <label for="refrescos">Sabores</label>
+          <select id="refrescos" name="refrescos" multiple size="5" aria-describedby="soda-help">
+            {% for sabor in sabores_soda %}
+              <option value="{{ sabor }}" {% if sabor in sabores_elegidos %}selected{% endif %}>{{ sabor }}</option>
+            {% endfor %}
+          </select>
+          <small id="soda-help" class="ingredient-help">
+            <span id="soda-help-text">Haz clic en un sabor para elegirlo.</span>
+            <strong id="soda-count" class="pick-count">0 / 1</strong>
+          </small>
+        </div>
+        <div class="form-field form-field--full soda-detail" id="soda-split" hidden>
+          <span class="soda-split__title">¿Cuántas de cada sabor?</span>
+          <div class="soda-split__rows">
+            {% for sabor in sabores_soda %}
+              <label class="soda-split__row" data-sabor="{{ sabor }}" hidden>
+                <span>{{ sabor }}</span>
+                <input type="number" name="cant_{{ sabor }}" min="1" max="{{ max_sodas }}"
+                  value="{{ form.get('cant_' ~ sabor, 1) }}" disabled>
+              </label>
+            {% endfor %}
+          </div>
+          <small id="soda-split-total" class="pick-count">Total 0 / 0</small>
+        </div>
+      </div>
+    </fieldset>
   </div>
 
   <div class="form-actions">
@@ -88,6 +126,10 @@
     <span>Entrega</span>
     <strong id="summary-delivery">Retiro en sitio</strong>
   </div>
+  <div class="summary-item">
+    <span>Sodas</span>
+    <strong id="summary-sodas">Ninguna</strong>
+  </div>
   <div class="summary-item" id="summary-address-row" hidden>
     <span>Dirección</span>
     <strong id="summary-address">Pendiente</strong>
@@ -104,7 +146,7 @@
 <div class="table-wrap">
 <table class="tabla">
   <thead>
-    <tr><th>#</th><th>Cliente</th><th>Pizza</th><th>Cant.</th><th>Total</th><th>Entrega</th><th>Estado</th><th>Fecha</th></tr>
+    <tr><th>#</th><th>Cliente</th><th>Pizza</th><th>Cant.</th><th>Sodas</th><th>Total</th><th>Entrega</th><th>Estado</th><th>Fecha</th></tr>
   </thead>
   <tbody>
     {% for pe in pedidos %}
@@ -113,6 +155,7 @@
       <td>{{ pe.cliente }}</td>
       <td>{{ pe.pizza_nombre }}</td>
       <td>{{ pe.cantidad }}</td>
+      <td>{{ pe.refresco }}</td>
       <td>${{ "%.2f"|format(pe.total) }}</td>
       <td>
         {{ pe.retiro_o_flete }}
@@ -122,12 +165,13 @@
       <td>{{ pe.fecha }}</td>
     </tr>
     {% else %}
-    <tr><td colspan="8">Todavía no hay pedidos registrados.</td></tr>
+    <tr><td colspan="9">Todavía no hay pedidos registrados.</td></tr>
     {% endfor %}
   </tbody>
 </table>
 </div>
 {% endblock %}
 {% block scripts %}
+<script src="{{ url_for('static', filename='click-select.js') }}" defer></script>
 <script src="{{ url_for('static', filename='order.js') }}" defer></script>
 {% endblock %}

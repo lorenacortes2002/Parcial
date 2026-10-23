@@ -38,7 +38,9 @@ CREATE TABLE IF NOT EXISTS pedidos (
     cliente TEXT NOT NULL,
     correo_cliente TEXT NOT NULL,
     pizza_id INTEGER NOT NULL,
-    refresco TEXT,
+    refresco TEXT,                              -- descripción, p. ej. "2× Coca-Cola, 1× Sprite (1 litro)"
+    refresco_cantidad INTEGER NOT NULL DEFAULT 1,
+    refresco_tamano TEXT,
     cantidad INTEGER NOT NULL DEFAULT 1,
     total REAL NOT NULL,
     estado TEXT NOT NULL DEFAULT 'PENDIENTE',   -- PENDIENTE / CONFIRMADO / PAGADO / DESPACHADO
@@ -78,6 +80,12 @@ def _migrate(conn):
     columnas = {row["name"] for row in conn.execute("PRAGMA table_info(pedidos)")}
     if "direccion" not in columnas:
         conn.execute("ALTER TABLE pedidos ADD COLUMN direccion TEXT")
+    if "refresco_cantidad" not in columnas:
+        conn.execute(
+            "ALTER TABLE pedidos ADD COLUMN refresco_cantidad INTEGER NOT NULL DEFAULT 1"
+        )
+    if "refresco_tamano" not in columnas:
+        conn.execute("ALTER TABLE pedidos ADD COLUMN refresco_tamano TEXT")
     columnas = {row["name"] for row in conn.execute("PRAGMA table_info(pizzas)")}
     if "entrega" not in columnas:
         conn.execute("ALTER TABLE pizzas ADD COLUMN entrega TEXT NOT NULL DEFAULT 'AMBOS'")

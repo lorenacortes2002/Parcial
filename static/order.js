@@ -60,8 +60,119 @@ if (pizzaSelect && quantityInput && deliverySelect) {
     summaryTotal.textContent = currency.format(unitPrice * quantity);
   };
 
+  // --- Sodas: cantidad, tamaño, sabores y reparto por sabor -------------
+  const sodaQty = document.querySelector("#refresco-cantidad");
+  const sodaSize = document.querySelector("#refresco-tamano");
+  const sodaFlavors = document.querySelector("#refrescos");
+  const sodaCount = document.querySelector("#soda-count");
+  const sodaHelpText = document.querySelector("#soda-help-text");
+  const sodaSplit = document.querySelector("#soda-split");
+  const sodaSplitTotal = document.querySelector("#soda-split-total");
+  const sodaDetails = document.querySelectorAll(".soda-detail:not(#soda-split)");
+  const splitRows = [...document.querySelectorAll(".soda-split__row")];
+  const summarySodas = document.querySelector("#summary-sodas");
+  let flavorsTouched = sodaFlavors?.selectedOptions.length > 0;
+
+  const sodaTotal = () =>
+    Math.min(Number(sodaQty.max), Math.max(0, Number.parseInt(sodaQty.value, 10) || 0));
+  const chosenFlavors = () => [...sodaFlavors.selectedOptions].map((o) => o.value);
+  const splitRow = (flavor) => splitRows.find((row) => row.dataset.sabor === flavor);
+
+  // Reparte las sodas en partes casi iguales entre los sabores elegidos.
+  const distribute = () => {
+    const flavors = chosenFlavors();
+    const total = sodaTotal();
+    flavors.forEach((flavor, i) => {
+      const share = Math.floor(total / flavors.length) + (i < total % flavors.length ? 1 : 0);
+      splitRow(flavor).querySelector("input").value = Math.max(1, share);
+    });
+  };
+
+  const updateSodas = () => {
+    const total = sodaTotal();
+    const hasSoda = total > 0;
+    sodaDetails.forEach((el) => { el.hidden = !hasSoda; });
+    sodaSize.disabled = !hasSoda;
+    sodaFlavors.disabled = !hasSoda;
+
+    // No puede haber más sabores que sodas: se quitan los últimos elegidos.
+    const selected = [...sodaFlavors.selectedOptions];
+    selected.slice(Math.max(total, 0)).forEach((o) => { o.selected = false; });
+
+    const flavors = chosenFlavors();
+    const maxFlavors = Math.max(total, 1);
+    sodaCount.textContent = `${flavors.length} / ${maxFlavors}`;
+    sodaCount.classList.toggle("is-ok", flavors.length >= 1);
+    sodaHelpText.textContent =
+      total > 1
+        ? `Haz clic en los sabores que quieras (hasta ${total}); otro clic lo quita.`
+        : "Haz clic en un sabor para elegirlo.";
+    sodaFlavors.setCustomValidity(hasSoda && !flavors.length ? "Elija al menos un sabor de soda." : "");
+
+    // Con 2 o más sabores se indica cuántas sodas de cada uno.
+    const showSplit = hasSoda && flavors.length > 1;
+    sodaSplit.hidden = !showSplit;
+    splitRows.forEach((row) => {
+      const active = showSplit && flavors.includes(row.dataset.sabor);
+      row.hidden = !active;
+      row.querySelector("input").disabled = !active;
+    });
+
+    let summary = "Ninguna";
+    if (hasSoda && flavors.length) {
+      const size = sodaSize.selectedOptions[0]?.textContent.trim() ?? "";
+      const parts = flavors.length === 1
+        ? [`${total}× ${flavors[0]}`]
+        : flavors.map((f) => `${splitRow(f).querySelector("input").value}× ${f}`);
+      summary = `${parts.join(", ")} · ${size}`;
+    }
+    summarySodas.textContent = summary;
+
+    if (showSplit) {
+      const inputs = flavors.map((f) => splitRow(f).querySelector("input"));
+      const sum = inputs.reduce((acc, input) => acc + (Number.parseInt(input.value, 10) || 0), 0);
+      sodaSplitTotal.textContent = `Total ${sum} / ${total}`;
+      sodaSplitTotal.classList.toggle("is-ok", sum === total);
+      inputs.at(-1).setCustomValidity(
+        sum === total ? "" : `La suma por sabor debe ser ${total} (ahora es ${sum}).`
+      );
+    }
+  };
+
+  // Si el cliente aún no eligió sabor, se sugiere el refresco del combo.
+  const suggestComboFlavor = () => {
+    if (flavorsTouched || sodaTotal() === 0) return;
+    const comboFlavor = pizzaSelect.selectedOptions[0]?.dataset.refresco;
+    [...sodaFlavors.options].forEach((o) => { o.selected = o.value === comboFlavor; });
+  };
+
+  if (sodaQty && sodaFlavors) {
+    window.enableClickSelect(sodaFlavors, {
+      getMax: () => Math.max(sodaTotal(), 1),
+      onLimit: () => window.shakeCounter(sodaCount),
+    });
+    sodaFlavors.addEventListener("change", () => {
+      flavorsTouched = true;
+      distribute();
+      updateSodas();
+    });
+    sodaQty.addEventListener("input", () => {
+      suggestComboFlavor();
+      distribute();
+      updateSodas();
+    });
+    sodaSize.addEventListener("change", updateSodas);
+    splitRows.forEach((row) => row.querySelector("input").addEventListener("input", updateSodas));
+    suggestComboFlavor();
+    updateSodas();
+  }
+
   pizzaSelect.addEventListener("change", () => {
     applyPizzaDelivery();
+    if (sodaFlavors) {
+      suggestComboFlavor();
+      updateSodas();
+    }
     updateSummary();
   });
   quantityInput.addEventListener("input", updateSummary);

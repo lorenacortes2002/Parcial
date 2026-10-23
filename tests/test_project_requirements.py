@@ -141,7 +141,9 @@ class ProjectRequirementsTests(unittest.TestCase):
                 "cliente": "Cliente de prueba",
                 "correo_cliente": "cliente@example.com",
                 "pizza_id": "1",
-                "refresco": "Coca-Cola",
+                "refrescos": ["Coca-Cola"],
+                "refresco_cantidad": "1",
+                "refresco_tamano": "LATA 12 OZ",
                 "cantidad": "2",
                 "retiro_o_flete": "FLETE A DOMICILIO",
                 "direccion": "David, Barrio Bolívar, calle 3, casa 24",
@@ -245,7 +247,9 @@ class ProjectRequirementsTests(unittest.TestCase):
                 "cliente": "Cliente",
                 "correo_cliente": "cliente@example.com",
                 "pizza_id": "1",
-                "refresco": "Coca-Cola",
+                "refrescos": ["Coca-Cola"],
+                "refresco_cantidad": "1",
+                "refresco_tamano": "LATA 12 OZ",
                 "cantidad": "1",
                 "retiro_o_flete": "FLETE A DOMICILIO",
                 "direccion": "  ",
@@ -263,7 +267,9 @@ class ProjectRequirementsTests(unittest.TestCase):
                 "cliente": "Cliente",
                 "correo_cliente": "cliente@example.com",
                 "pizza_id": "1",
-                "refresco": "Coca-Cola",
+                "refrescos": ["Coca-Cola"],
+                "refresco_cantidad": "1",
+                "refresco_tamano": "LATA 12 OZ",
                 "cantidad": "1",
                 "retiro_o_flete": "RETIRO EN SITIO",
                 "direccion": "No debería guardarse",
@@ -280,7 +286,9 @@ class ProjectRequirementsTests(unittest.TestCase):
                 "cliente": "Cliente",
                 "correo_cliente": "cliente@example.com",
                 "pizza_id": "2",
-                "refresco": "Sprite",
+                "refrescos": ["Sprite"],
+                "refresco_cantidad": "1",
+                "refresco_tamano": "LATA 12 OZ",
                 "cantidad": "1",
                 "retiro_o_flete": "RETIRO EN SITIO",
             },
@@ -339,7 +347,9 @@ class ProjectRequirementsTests(unittest.TestCase):
             "cliente": "Cliente",
             "correo_cliente": "cliente@example.com",
             "pizza_id": str(pizza_id),
-            "refresco": "Sprite",
+            "refrescos": ["Sprite"],
+            "refresco_cantidad": "1",
+            "refresco_tamano": "LATA 12 OZ",
             "cantidad": "1",
         }
         rejected = self.client.post(
@@ -366,6 +376,64 @@ class ProjectRequirementsTests(unittest.TestCase):
             [("AMBOS",)],
         )
 
+    def test_order_sodas_quantity_flavors_and_size(self):
+        pedido = {
+            "cliente": "Cliente",
+            "correo_cliente": "cliente@example.com",
+            "pizza_id": "1",
+            "cantidad": "1",
+            "retiro_o_flete": "RETIRO EN SITIO",
+            "refresco_cantidad": "3",
+            "refresco_tamano": "1 LITRO",
+            "refrescos": ["Coca-Cola", "Sprite"],
+        }
+        bad_sum = self.client.post(
+            "/pedidos", data={**pedido, "cant_Coca-Cola": "1", "cant_Sprite": "1"}
+        )
+        self.assertIn("La suma de sodas por sabor debe ser igual a 3".encode(), bad_sum.data)
+        too_many = self.client.post(
+            "/pedidos",
+            data={**pedido, "refresco_cantidad": "1", "cant_Coca-Cola": "1", "cant_Sprite": "1"},
+        )
+        self.assertIn("más sabores que sodas".encode(), too_many.data)
+        bad_size = self.client.post(
+            "/pedidos", data={**pedido, "refresco_tamano": "BALDE",
+                              "cant_Coca-Cola": "2", "cant_Sprite": "1"}
+        )
+        self.assertIn("tamaño de soda válido".encode(), bad_size.data)
+        self.assertEqual(
+            self._rows(self.local_path, "SELECT COUNT(*) FROM pedidos")[0][0], 0
+        )
+
+        self.client.post(
+            "/pedidos", data={**pedido, "cant_Coca-Cola": "2", "cant_Sprite": "1"}
+        )
+        expected = [("2× Coca-Cola, 1× Sprite (1 litro)", 3, "1 LITRO")]
+        for path in (self.local_path, self.replica_path):
+            self.assertEqual(
+                self._rows(path, "SELECT refresco, refresco_cantidad, refresco_tamano FROM pedidos"),
+                expected,
+            )
+        order_json = json.loads(
+            next(self.pedidos_dir.glob("*.json")).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            order_json["refrescos_detalle"],
+            [{"sabor": "Coca-Cola", "cantidad": 2}, {"sabor": "Sprite", "cantidad": 1}],
+        )
+
+        # Sin soda: cantidad 0 ignora sabores y tamaño.
+        self.client.post(
+            "/pedidos", data={**pedido, "refresco_cantidad": "0", "refrescos": []}
+        )
+        self.assertEqual(
+            self._rows(
+                self.local_path,
+                "SELECT refresco, refresco_cantidad, refresco_tamano FROM pedidos ORDER BY id DESC",
+            )[0],
+            ("Ninguno", 0, None),
+        )
+
     def test_unknown_yappy_code_is_handled(self):
         self.assertEqual(self.client.get("/yappy/pagar/CC-NOPE00").status_code, 404)
         self.assertEqual(
@@ -387,7 +455,9 @@ class ProjectRequirementsTests(unittest.TestCase):
                 "cliente": "Cliente",
                 "correo_cliente": "cliente@example.com",
                 "pizza_id": "1",
-                "refresco": "Coca-Cola",
+                "refrescos": ["Coca-Cola"],
+                "refresco_cantidad": "1",
+                "refresco_tamano": "LATA 12 OZ",
                 "cantidad": "1",
                 "retiro_o_flete": "RETIRO EN SITIO",
             },
@@ -413,7 +483,7 @@ class ProjectRequirementsTests(unittest.TestCase):
         html = order_page.get_data(as_text=True)
         self.assertRegex(
             html,
-            re.compile(r'<option value="3" data-price="7\.25" data-entrega="AMBOS"\s+selected>'),
+            re.compile(r'<option value="3" data-price="7\.25" data-entrega="AMBOS"[^>]*\s+selected>'),
         )
         self.assertIn(b'id="summary-total"', order_page.data)
         self.assertIn(b'static/order.js', order_page.data)
