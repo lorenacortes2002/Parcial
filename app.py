@@ -18,6 +18,7 @@ import secrets
 import socket
 import math
 import re
+import sqlite3
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -223,9 +224,8 @@ def _contar_combos(excluir_id=None):
     conn = database.get_local_conn()
     try:
         return conn.execute(
-            "SELECT COUNT(*) FROM pizzas WHERE tipo IN ('COMBO', 'DUO') "
-            "AND (? IS NULL OR id <> ?)",
-            (excluir_id, excluir_id),
+            "SELECT COUNT(*) FROM pizzas WHERE tipo IN ('COMBO', 'DUO') AND id IS NOT ?",
+            (excluir_id,),
         ).fetchone()[0]
     finally:
         conn.close()
@@ -297,7 +297,7 @@ def index():
         conn = database.get_local_conn()
         productos = _cargar_productos(conn)
         conn.close()
-    except database.Error as e:
+    except sqlite3.Error as e:
         flash(f"Error al cargar el menú: {e}", "danger")
         productos = []
     return render_template(
@@ -318,7 +318,7 @@ def fabrica():
         conn = database.get_local_conn()
         pizzas = _cargar_productos(conn)
         conn.close()
-    except database.Error as e:
+    except sqlite3.Error as e:
         flash(f"Error al consultar pizzas: {e}", "danger")
         pizzas = []
     return render_template(
@@ -352,7 +352,7 @@ def fabrica_nueva():
             )
             return redirect(url_for("fabrica"))
 
-        except (ValueError, RuntimeError, *database.Error) as e:
+        except (ValueError, RuntimeError, sqlite3.Error) as e:
             flash(f"Error: {e}", "danger")
 
     tipo_actual = request.form.get("tipo") or request.args.get("tipo", "COMBO")
@@ -380,7 +380,7 @@ def fabrica_editar(pizza_id):
         conn = database.get_local_conn()
         pizza = conn.execute("SELECT * FROM pizzas WHERE id=?", (pizza_id,)).fetchone()
         conn.close()
-    except database.Error as e:
+    except sqlite3.Error as e:
         flash(f"Error al cargar la pizza: {e}", "danger")
         return redirect(url_for("fabrica"))
 
@@ -422,7 +422,7 @@ def fabrica_editar(pizza_id):
             flash(f"'{datos['nombre']}' actualizado correctamente.", "success")
             return redirect(url_for("fabrica"))
 
-        except (ValueError, RuntimeError, *database.Error) as e:
+        except (ValueError, RuntimeError, sqlite3.Error) as e:
             flash(f"Error: {e}", "danger")
 
     ingredientes_actuales = pizza["ingredientes"].split(",") if pizza["ingredientes"] else []
@@ -440,7 +440,7 @@ def fabrica_eliminar(pizza_id):
         conn.close()
         combos_restantes = _contar_combos(excluir_id=pizza_id)
         usados = _combos_que_usan(pizza_id)
-    except database.Error as e:
+    except sqlite3.Error as e:
         flash(f"Error al comprobar el catálogo: {e}", "danger")
         return redirect(url_for("fabrica"))
 
@@ -636,7 +636,7 @@ def pedidos_agregar():
         session["carrito"] = carrito + [item]
         linea = nuevo[-1]
         flash(f"Agregado al pedido: {linea['cantidad']}× {linea['descripcion']}.", "success")
-    except (ValueError, *database.Error) as e:
+    except (ValueError, sqlite3.Error) as e:
         flash(f"No se pudo agregar: {e}", "danger")
     return redirect(url_for("pedidos") + "#tu-pedido")
 
@@ -656,7 +656,7 @@ def pedidos_quitar(indice):
 def pedidos():
     try:
         productos, lista_pedidos = _cargar_pagina_pedidos()
-    except database.Error as e:
+    except sqlite3.Error as e:
         flash(f"Error al cargar datos: {e}", "danger")
         productos, lista_pedidos = [], []
     productos_por_id = {p["id"]: p for p in productos}
@@ -799,7 +799,7 @@ def pedidos():
             flash(f"Pedido #{pedido_id} confirmado y guardado en ambas bases.", "success")
             return redirect(url_for("pedidos"))
 
-        except (ValueError, RuntimeError, TypeError, *database.Error) as e:
+        except (ValueError, RuntimeError, TypeError, sqlite3.Error) as e:
             flash(f"Error al crear el pedido: {e}", "danger")
 
     # Producto preseleccionado (p. ej. desde el botón «Pedir» del menú).
@@ -918,7 +918,7 @@ def _confirmar_cobro(cobro, pedido, referencia):
         ]
     )
     if not ok:
-        if database.es_duplicado(error):
+        if "UNIQUE" in (error or ""):
             raise ValueError("Este pedido ya tiene un pago registrado.")
         raise RuntimeError(error)
     if error:
@@ -1011,7 +1011,7 @@ def pagos():
                 flash(error, "warning")
             return redirect(url_for("cobro_yappy", codigo=codigo))
 
-        except (ValueError, RuntimeError, TypeError, *database.Error) as e:
+        except (ValueError, RuntimeError, TypeError, sqlite3.Error) as e:
             flash(f"Error al generar el cobro: {e}", "danger")
 
     try:
@@ -1033,7 +1033,7 @@ def pagos():
             "ORDER BY pagos.id DESC"
         ).fetchall()
         conn.close()
-    except database.Error as e:
+    except sqlite3.Error as e:
         flash(f"Error al cargar datos: {e}", "danger")
         pedidos_pendientes, historial_pagos = [], []
 
@@ -1047,7 +1047,7 @@ def cobro_yappy(codigo):
     """Pantalla de caja: QR, número Yappy y confirmación del pago."""
     try:
         cobro, pedido = _obtener_cobro(codigo)
-    except database.Error as e:
+    except sqlite3.Error as e:
         flash(f"Error al cargar el cobro: {e}", "danger")
         return redirect(url_for("pagos"))
     if cobro is None:
@@ -1066,7 +1066,7 @@ def cobro_yappy(codigo):
             _confirmar_cobro(cobro, pedido, referencia)
             flash(f"Pago del pedido #{pedido['id']} confirmado (ref. {referencia}).", "success")
             return redirect(url_for("cobro_yappy", codigo=codigo))
-        except (ValueError, RuntimeError, *database.Error) as e:
+        except (ValueError, RuntimeError, sqlite3.Error) as e:
             flash(f"Error al confirmar el pago: {e}", "danger")
 
     url_pago = _url_publica("yappy_pagar", codigo=codigo)
@@ -1082,7 +1082,7 @@ def cobro_yappy_estado(codigo):
     """Consulta ligera que usa la pantalla de caja para detectar el pago."""
     try:
         cobro, _ = _obtener_cobro(codigo)
-    except database.Error as e:
+    except sqlite3.Error as e:
         return jsonify(error=str(e)), 500
     if cobro is None:
         return jsonify(error="Cobro no encontrado"), 404
@@ -1101,7 +1101,7 @@ def yappy_pagar(codigo):
     """
     try:
         cobro, pedido = _obtener_cobro(codigo)
-    except database.Error as e:
+    except sqlite3.Error as e:
         flash(f"Error al cargar el cobro: {e}", "danger")
         cobro = pedido = None
     if cobro is None:
@@ -1114,27 +1114,13 @@ def yappy_pagar(codigo):
                 raise RuntimeError(f"No se pudo procesar el pago con Yappy: {error_pago}")
             _confirmar_cobro(cobro, pedido, referencia)
             return redirect(url_for("yappy_pagar", codigo=codigo))
-        except (ValueError, RuntimeError, *database.Error) as e:
+        except (ValueError, RuntimeError, sqlite3.Error) as e:
             flash(f"Error al procesar el pago: {e}", "danger")
 
     return render_template(
         "yappy_pagar.html", cobro=cobro, pedido=pedido,
         yappy_directorio=YAPPY_DIRECTORIO,
     )
-
-
-# ----------------------------------------------------------------------
-# RÉPLICA — estado de la replicación maestro-esclavo (para demostrarla)
-# ----------------------------------------------------------------------
-@app.route("/replica")
-def replica():
-    try:
-        estado = database.estado_replicacion()
-    except database.Error as e:
-        flash(f"Error al consultar la base de datos: {e}", "danger")
-        estado = {"motor": database.motor(), "maestro": None, "esclavo": None,
-                  "error_esclavo": None}
-    return render_template("replica.html", estado=estado, tablas=database.TABLAS)
 
 
 if __name__ == "__main__":

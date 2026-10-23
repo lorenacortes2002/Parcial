@@ -1,230 +1,27 @@
 """
 database.py
 -------------------------------------------------
-Acceso a la base de datos. Hay dos motores, según DB_MOTOR (archivo .env):
+Maneja la conexión a DOS bases de datos SQLite:
+  - db_local.sqlite3   -> Base de datos RELACIONAL local (Sede principal, Chiriquí)
+  - db_replica.sqlite3 -> Base de datos RELACIONAL de réplica (simula la
+                           "Máquina Virtual" de la sucursal de Veraguas)
 
-  - mariadb -> MariaDB (motor principal). La app escribe SOLO en el servidor
-               MAESTRO (PC de la sede principal, Chiriquí) y MariaDB replica
-               cada cambio por sí solo al servidor ESCLAVO de la máquina
-               virtual (sucursal Veraguas): replicación nativa maestro-esclavo
-               con el registro binario (binlog).
-  - sqlite  -> (por defecto) dos archivos SQLite: db_local.sqlite3 y
-               db_replica.sqlite3, y la app copia cada escritura a la réplica.
-               Se usa en las pruebas automáticas y en equipos sin MariaDB.
+Toda operación de escritura (INSERT/UPDATE/DELETE) sobre pedidos y pagos
+se realiza primero en la base LOCAL y luego se REPLICA en la base de
+réplica, cumpliendo con el requisito de "Replicación de Datos" del examen.
 
 Todas las operaciones están protegidas con TRY/EXCEPT, tal como lo pide
 el examen (control de errores en los campos / operaciones).
 -------------------------------------------------
 """
 
+import sqlite3
 import os
 import re
-import sqlite3
-
-import pymysql
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_LOCAL_PATH = os.path.join(BASE_DIR, "db_local.sqlite3")
 DB_REPLICA_PATH = os.path.join(BASE_DIR, "db_replica.sqlite3")
-
-# Errores de base de datos de ambos motores (para usar en "except Error").
-Error = (sqlite3.Error, pymysql.MySQLError)
-
-TABLAS = ("pizzas", "pedidos", "pedido_items", "pagos", "cobros_yappy")
-
-
-def motor():
-    """Motor configurado: "mariadb" o "sqlite" (por defecto)."""
-    return os.environ.get("DB_MOTOR", "sqlite").strip().lower()
-
-
-def usa_mariadb():
-    return motor() == "mariadb"
-
-
-def es_duplicado(error):
-    """True si el error es una violación de clave única (en SQLite o MariaDB)."""
-    texto = str(error or "")
-    return "UNIQUE" in texto or "Duplicate entry" in texto
-
-
-# ----------------------------------------------------------------------
-# MariaDB: conexión con la misma interfaz que sqlite3 (conn.execute,
-# "with conn", filas que se leen por nombre o por posición)
-# ----------------------------------------------------------------------
-class Fila(tuple):
-    """Fila que se lee por posición (fila[0]) o por nombre (fila["id"])."""
-
-    def __new__(cls, valores, indices):
-        fila = super().__new__(cls, valores)
-        fila._indices = indices
-        return fila
-
-    def __getitem__(self, clave):
-        if isinstance(clave, str):
-            return tuple.__getitem__(self, self._indices[clave])
-        return tuple.__getitem__(self, clave)
-
-    def keys(self):
-        return list(self._indices)
-
-
-class _CursorMariaDB:
-    def __init__(self, cursor):
-        self._cursor = cursor
-        columnas = [c[0] for c in cursor.description] if cursor.description else []
-        self._indices = {nombre: i for i, nombre in enumerate(columnas)}
-        self.description = cursor.description
-        self.lastrowid = cursor.lastrowid
-
-    def fetchone(self):
-        fila = self._cursor.fetchone()
-        return Fila(fila, self._indices) if fila is not None else None
-
-    def fetchall(self):
-        return [Fila(fila, self._indices) for fila in self._cursor.fetchall()]
-
-    def __iter__(self):
-        return iter(self.fetchall())
-
-
-class ConexionMariaDB:
-    """Envuelve una conexión PyMySQL para usarla igual que una de sqlite3."""
-
-    def __init__(self, conexion):
-        self._conexion = conexion
-
-    @staticmethod
-    def _traducir(sql):
-        # sqlite3 usa "?" como marcador y PyMySQL "%s" (los "%" literales van dobles).
-        return sql.replace("%", "%%").replace("?", "%s")
-
-    def execute(self, sql, params=()):
-        cursor = self._conexion.cursor()
-        cursor.execute(self._traducir(sql), tuple(params))
-        return _CursorMariaDB(cursor)
-
-    def commit(self):
-        self._conexion.commit()
-
-    def rollback(self):
-        self._conexion.rollback()
-
-    def close(self):
-        self._conexion.close()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, tipo, valor, traza):
-        # Igual que sqlite3: confirma si todo salió bien, deshace si hubo error.
-        if tipo is None:
-            self.commit()
-        else:
-            self.rollback()
-        return False
-
-
-def conectar_mariadb(host=None, port=None, user=None, password=None, database=None):
-    """Abre una conexión a MariaDB (por defecto, el maestro configurado en .env)."""
-    conexion = pymysql.connect(
-        host=host or os.environ.get("DB_HOST", "127.0.0.1"),
-        port=int(port or os.environ.get("DB_PORT", 3306)),
-        user=user or os.environ.get("DB_USER", "chinos_app"),
-        password=password if password is not None else os.environ.get("DB_PASSWORD", ""),
-        database=database or os.environ.get("DB_NAME", "chinos_cafe"),
-        charset="utf8mb4",
-        autocommit=False,
-        connect_timeout=5,
-    )
-    # "||" concatena textos, igual que en SQLite (por defecto en MariaDB es OR).
-    with conexion.cursor() as cursor:
-        cursor.execute("SET SESSION sql_mode = CONCAT(@@SESSION.sql_mode, ',PIPES_AS_CONCAT')")
-    return ConexionMariaDB(conexion)
-
-
-SCHEMA_MARIADB = [
-    """
-    CREATE TABLE IF NOT EXISTS pizzas (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        nombre VARCHAR(120) NOT NULL,
-        ingredientes TEXT NOT NULL,
-        refresco VARCHAR(40) NULL,
-        precio DOUBLE NOT NULL DEFAULT 5.00,
-        entrega VARCHAR(20) NOT NULL DEFAULT 'AMBOS',
-        tipo VARCHAR(10) NOT NULL DEFAULT 'COMBO',
-        pizza1_id INT NULL,
-        pizza2_id INT NULL,
-        FOREIGN KEY (pizza1_id) REFERENCES pizzas(id),
-        FOREIGN KEY (pizza2_id) REFERENCES pizzas(id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS pedidos (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        cliente VARCHAR(120) NOT NULL,
-        correo_cliente VARCHAR(160) NOT NULL,
-        pizza_id INT NOT NULL,
-        refresco TEXT NULL,
-        refresco_cantidad INT NOT NULL DEFAULT 1,
-        refresco_tamano VARCHAR(20) NULL,
-        cantidad INT NOT NULL DEFAULT 1,
-        subtotal DOUBLE NULL,
-        flete DOUBLE NOT NULL DEFAULT 0,
-        total DOUBLE NOT NULL,
-        estado VARCHAR(40) NOT NULL DEFAULT 'PENDIENTE',
-        retiro_o_flete VARCHAR(20) NOT NULL DEFAULT 'RETIRO EN SITIO',
-        direccion VARCHAR(300) NULL,
-        fecha VARCHAR(19) NOT NULL,
-        detalle TEXT NULL,
-        json_pedido MEDIUMTEXT NULL,
-        FOREIGN KEY (pizza_id) REFERENCES pizzas(id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS pagos (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        pedido_id INT NOT NULL UNIQUE,
-        metodo VARCHAR(160) NOT NULL DEFAULT 'YAPPY COMERCIAL',
-        monto DOUBLE NOT NULL,
-        estado VARCHAR(20) NOT NULL DEFAULT 'CONFIRMADO',
-        fecha VARCHAR(19) NOT NULL,
-        json_pago MEDIUMTEXT NULL,
-        FOREIGN KEY (pedido_id) REFERENCES pedidos(id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS pedido_items (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        pedido_id INT NOT NULL,
-        pizza_id INT NOT NULL,
-        cantidad INT NOT NULL,
-        precio_unitario DOUBLE NOT NULL,
-        borde VARCHAR(20) NOT NULL DEFAULT 'CLASICO',
-        precio_borde DOUBLE NOT NULL DEFAULT 0,
-        sodas TEXT NOT NULL,
-        sodas_cantidad INT NOT NULL DEFAULT 0,
-        sodas_tamano VARCHAR(20) NULL,
-        precio_sodas DOUBLE NOT NULL DEFAULT 0,
-        subtotal DOUBLE NOT NULL,
-        FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE CASCADE,
-        FOREIGN KEY (pizza_id) REFERENCES pizzas(id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS cobros_yappy (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        pedido_id INT NOT NULL,
-        codigo VARCHAR(20) NOT NULL UNIQUE,
-        monto DOUBLE NOT NULL,
-        estado VARCHAR(20) NOT NULL DEFAULT 'PENDIENTE',
-        referencia VARCHAR(40) NULL,
-        fecha VARCHAR(19) NOT NULL,
-        fecha_pago VARCHAR(19) NULL,
-        FOREIGN KEY (pedido_id) REFERENCES pedidos(id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    """,
-]
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS pizzas (
@@ -362,9 +159,6 @@ def _connect(path):
 
 
 def get_local_conn():
-    """Conexión a la base principal: el maestro MariaDB o db_local.sqlite3."""
-    if usa_mariadb():
-        return conectar_mariadb()
     return _connect(DB_LOCAL_PATH)
 
 
@@ -373,19 +167,7 @@ def get_replica_conn():
 
 
 def init_db():
-    """Crea las tablas si no existen y carga el catálogo inicial."""
-    if usa_mariadb():
-        # En MariaDB se crean solo en el maestro: el esclavo las recibe por replicación.
-        conn = get_local_conn()
-        try:
-            with conn:
-                for sentencia in SCHEMA_MARIADB:
-                    conn.execute(sentencia)
-        finally:
-            conn.close()
-        _cargar_catalogo()
-        return
-
+    """Crea las tablas en AMBAS bases de datos (local y réplica) si no existen."""
     for path in (DB_LOCAL_PATH, DB_REPLICA_PATH):
         conn = None
         try:
@@ -400,51 +182,11 @@ def init_db():
             if conn is not None:
                 conn.close()
 
-    pizzas = _cargar_catalogo()
-
-    # En SQLite la app copia el catálogo a la réplica con sus mismos IDs.
+    # Garantiza el catálogo inicial (cinco combos, sus versiones individuales,
+    # otras pizzas individuales y combos de 2 pizzas) y lo replica con sus mismos IDs. El queso mozzarella es la base de todas
+    # las pizzas, por eso no aparece en la lista de ingredientes.
     try:
-        replica_conn = get_replica_conn()
-        try:
-            with replica_conn:
-                for pizza in pizzas:
-                    replica_conn.execute(
-                        """
-                        INSERT INTO pizzas (id, nombre, ingredientes, refresco, precio, entrega, tipo,
-                                            pizza1_id, pizza2_id)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ON CONFLICT(id) DO UPDATE SET
-                            nombre=excluded.nombre,
-                            ingredientes=excluded.ingredientes,
-                            refresco=excluded.refresco,
-                            precio=excluded.precio,
-                            entrega=excluded.entrega,
-                            tipo=excluded.tipo,
-                            pizza1_id=excluded.pizza1_id,
-                            pizza2_id=excluded.pizza2_id
-                        """,
-                        (
-                            pizza["id"], pizza["nombre"], pizza["ingredientes"],
-                            pizza["refresco"], pizza["precio"], pizza["entrega"],
-                            pizza["tipo"], pizza["pizza1_id"], pizza["pizza2_id"],
-                        ),
-                    )
-        finally:
-            replica_conn.close()
-    except sqlite3.Error as e:
-        print(f"[ERROR DB] No se pudo replicar el catálogo de ejemplo: {e}")
-        raise
-
-
-def _cargar_catalogo():
-    """
-    Garantiza el catálogo inicial (cinco combos, sus versiones individuales,
-    otras pizzas individuales y combos de 2 pizzas). El queso mozzarella es la
-    base de todas las pizzas, por eso no aparece en la lista de ingredientes.
-    Devuelve todas las pizzas.
-    """
-    conn = get_local_conn()
-    try:
+        conn = get_local_conn()
         demo_pizzas = [
             ("Pepperoni Clásica", "pepperoni,salsa de tomate", "Coca-Cola", 7.50, "COMBO"),
             ("Hawaiana", "jamón,piña,salsa de tomate", "Sprite", 7.75, "COMBO"),
@@ -508,20 +250,43 @@ def _cargar_catalogo():
                     (nombre, soda, precio, individuales[pizza1], individuales[pizza2]),
                 )
         conn.commit()
-        return conn.execute("SELECT * FROM pizzas ORDER BY id").fetchall()
-    except Error as e:
+        pizzas = conn.execute("SELECT * FROM pizzas ORDER BY id").fetchall()
+        conn.close()
+
+        replica_conn = get_replica_conn()
+        try:
+            with replica_conn:
+                for pizza in pizzas:
+                    replica_conn.execute(
+                        """
+                        INSERT INTO pizzas (id, nombre, ingredientes, refresco, precio, entrega, tipo,
+                                            pizza1_id, pizza2_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(id) DO UPDATE SET
+                            nombre=excluded.nombre,
+                            ingredientes=excluded.ingredientes,
+                            refresco=excluded.refresco,
+                            precio=excluded.precio,
+                            entrega=excluded.entrega,
+                            tipo=excluded.tipo,
+                            pizza1_id=excluded.pizza1_id,
+                            pizza2_id=excluded.pizza2_id
+                        """,
+                        (
+                            pizza["id"], pizza["nombre"], pizza["ingredientes"],
+                            pizza["refresco"], pizza["precio"], pizza["entrega"],
+                            pizza["tipo"], pizza["pizza1_id"], pizza["pizza2_id"],
+                        ),
+                    )
+        finally:
+            replica_conn.close()
+    except sqlite3.Error as e:
         print(f"[ERROR DB] No se pudo preparar el catálogo de ejemplo: {e}")
         raise
-    finally:
-        conn.close()
 
 
 def replicate_transaction(operations):
-    """
-    Aplica un grupo de escrituras como una sola transacción. En MariaDB se
-    escribe solo en el maestro (el esclavo se actualiza por replicación nativa);
-    en SQLite se copian a la réplica conservando los IDs de los inserts.
-    """
+    """Aplica un grupo de escrituras en ambas bases; conserva IDs al replicar inserts."""
     local_conn = None
     replica_conn = None
     local_ids = []
@@ -531,7 +296,7 @@ def replicate_transaction(operations):
             for sql, params in operations:
                 cur = local_conn.execute(sql, params)
                 local_ids.append(cur.lastrowid)
-    except Error as e:
+    except sqlite3.Error as e:
         if local_conn is not None:
             local_conn.rollback()
         print(f"[ERROR DB LOCAL] {e}")
@@ -539,9 +304,6 @@ def replicate_transaction(operations):
     finally:
         if local_conn is not None:
             local_conn.close()
-
-    if usa_mariadb():
-        return True, local_ids, None
 
     try:
         replica_conn = get_replica_conn()
@@ -585,80 +347,3 @@ def replicate_write(sql, params):
     ok, last_ids, error = replicate_transaction([(sql, params)])
     last_id = last_ids[0] if last_ids else None
     return ok, last_id, error
-
-
-# ----------------------------------------------------------------------
-# Estado de la replicación (página «Réplica»)
-# ----------------------------------------------------------------------
-def _contar_tablas(conn):
-    return {
-        tabla: conn.execute(f"SELECT COUNT(*) FROM {tabla}").fetchone()[0]
-        for tabla in TABLAS
-    }
-
-
-def estado_replicacion():
-    """
-    Resume el estado de la replicación para mostrarlo en la app.
-    En MariaDB consulta el maestro (SHOW BINLOG STATUS) y, si DB_REPLICA_HOST
-    está configurado, el esclavo de la máquina virtual (SHOW SLAVE STATUS).
-    """
-    estado = {"motor": motor(), "maestro": None, "esclavo": None, "error_esclavo": None}
-
-    if not usa_mariadb():
-        for clave, ruta in (("maestro", DB_LOCAL_PATH), ("esclavo", DB_REPLICA_PATH)):
-            conn = _connect(ruta)
-            try:
-                estado[clave] = {"nombre": os.path.basename(ruta), "conteos": _contar_tablas(conn)}
-            finally:
-                conn.close()
-        return estado
-
-    conn = get_local_conn()
-    try:
-        binlog = conn.execute("SHOW BINLOG STATUS").fetchone()
-        estado["maestro"] = {
-            "host": f"{os.environ.get('DB_HOST', '127.0.0.1')}:{os.environ.get('DB_PORT', 3306)}",
-            "version": conn.execute("SELECT VERSION()").fetchone()[0],
-            "server_id": conn.execute("SELECT @@server_id").fetchone()[0],
-            "binlog": f"{binlog['File']} · posición {binlog['Position']}" if binlog else "desactivado",
-            "gtid": conn.execute("SELECT @@gtid_binlog_pos").fetchone()[0],
-            "conteos": _contar_tablas(conn),
-        }
-    finally:
-        conn.close()
-
-    host = os.environ.get("DB_REPLICA_HOST", "").strip()
-    if not host:
-        return estado
-    try:
-        esclavo = conectar_mariadb(
-            host=host,
-            port=os.environ.get("DB_REPLICA_PORT", 3306),
-            user=os.environ.get("DB_REPLICA_USER", "chinos_monitor"),
-            password=os.environ.get("DB_REPLICA_PASSWORD", ""),
-        )
-    except Error as e:
-        estado["error_esclavo"] = f"No se pudo conectar con el esclavo {host}: {e}"
-        return estado
-    try:
-        fila = esclavo.execute("SHOW SLAVE STATUS").fetchone()
-        estado["esclavo"] = {
-            "host": f"{host}:{os.environ.get('DB_REPLICA_PORT', 3306)}",
-            "version": esclavo.execute("SELECT VERSION()").fetchone()[0],
-            "server_id": esclavo.execute("SELECT @@server_id").fetchone()[0],
-            "read_only": bool(esclavo.execute("SELECT @@read_only").fetchone()[0]),
-            "configurado": fila is not None,
-            "io": fila["Slave_IO_Running"] if fila else "No",
-            "sql": fila["Slave_SQL_Running"] if fila else "No",
-            "retraso": fila["Seconds_Behind_Master"] if fila else None,
-            "maestro": f"{fila['Master_Host']}:{fila['Master_Port']}" if fila else "-",
-            "gtid": fila["Gtid_IO_Pos"] if fila else "",
-            "error": (fila["Last_IO_Error"] or fila["Last_SQL_Error"]) if fila else "",
-            "conteos": _contar_tablas(esclavo),
-        }
-    except Error as e:
-        estado["error_esclavo"] = f"No se pudo leer el estado del esclavo: {e}"
-    finally:
-        esclavo.close()
-    return estado

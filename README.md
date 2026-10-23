@@ -6,14 +6,14 @@ Prototipo CRUD en **Python + Flask** para la I Parte del examen (Caso de Estudio
 ```
 chinos_cafe/
 ├── app.py              # Rutas Flask (Fábrica, Pedidos, Pagos)
-├── database.py         # Conexión a MariaDB (maestro-esclavo) o, sin MariaDB, a 2 bases SQLite
+├── database.py         # Conexión y replicación a 2 bases SQLite (local y réplica)
 ├── utils.py             # Generación de JSON + envío de correo + pago Yappy (simulado)
 ├── requirements.txt
 ├── templates/            # Vistas HTML (Jinja2)
 ├── static/style.css
 ├── tests/                 # Pruebas automatizadas de los requisitos del prototipo
-├── db_local.sqlite3      # Solo sin MariaDB: BD local (se crea al primer arranque)
-├── db_replica.sqlite3    # Solo sin MariaDB: BD de réplica
+├── db_local.sqlite3      # Se crea al primer arranque (BD relacional local)
+├── db_replica.sqlite3    # Se crea al primer arranque (BD de réplica / VM Veraguas)
 └── correos_enviados.log  # Registro de cada intento de envío de correo
 ```
 
@@ -46,8 +46,8 @@ Abrir **http://127.0.0.1:5000**
   que en un combo de 2 pizzas se cobra dos veces. Si el pedido es **a domicilio** se suma un
   **flete del 5%** del subtotal de los productos (se guarda en `pedidos.subtotal`, `pedidos.flete`
   y `pedidos.total`). Al confirmar, el pedido
-  y sus productos (`pedido_items`) se guardan en el **maestro MariaDB**, que los **replica** al
-  esclavo de la máquina virtual (sección 4). Su JSON se guarda en la base de datos (columna `pedidos.json_pedido`, también
+  y sus productos (`pedido_items`) se guardan en `db_local.sqlite3`, se **replican** en
+  `db_replica.sqlite3`. Su JSON se guarda en la base de datos (columna `pedidos.json_pedido`, también
   replicada); no se crean archivos JSON. El correo **no** se envía todavía: se envía al confirmarse el pago.
   Si se elige **Flete a domicilio** aparece el campo **Dirección de entrega**, que es obligatorio
   y se guarda en el pedido, su JSON y los correos.
@@ -73,8 +73,9 @@ python -m unittest discover -s tests -v
 Las pruebas usan bases SQLite temporales y simulan el correo para no enviar mensajes reales.
 La tarea de VS Code **Iniciar app Flask** abre la vista local en `http://127.0.0.1:5005`.
 
-Las pruebas usan SQLite (bases temporales). Si el `.env` configura MariaDB, además se ejecutan
-pruebas contra una base aparte, `chinos_cafe_test` (ver `tests/test_mariadb.py`).
+La base `db_replica.sqlite3` simula una réplica relacional; no se conecta automáticamente a una
+máquina virtual remota. Para una réplica entre equipos, hay que configurar y desplegar un servidor
+de base de datos accesible desde ambas máquinas.
 
 ### Configurar el correo real
 El envío ya está configurado para Gmail con la cuenta `candanedoangel@gmail.com` (en `utils.py`).
@@ -187,119 +188,17 @@ knock 172.20.10.100 7000 8000 9000
 ssh usuario@172.20.10.100
 ```
 
-## 4. Replicación de datos: MariaDB maestro-esclavo
-
-La app usa **MariaDB** (`DB_MOTOR=mariadb` en el `.env`) y escribe **solo en el servidor maestro**
-(PC de la sede principal). MariaDB registra cada cambio en su *registro binario* (binlog) y el
-servidor **esclavo** de la máquina virtual (sucursal Veraguas) lo copia automáticamente:
-replicación nativa, sin que la app intervenga. El esclavo es de **solo lectura**.
-
-```
- PC (sede principal)                         VM Ubuntu (sucursal Veraguas)
- ┌──────────────────────────┐   binlog     ┌──────────────────────────┐
- │ App Flask ──► MariaDB     │ ───────────► │ MariaDB ESCLAVO          │
- │              MAESTRO      │  (usuario    │ server_id=2, read_only   │
- │ server_id=1, puerto 3307  │  replicador) │ puerto 3306              │
- └──────────────────────────┘              └──────────────────────────┘
-        192.168.56.1   ◄── red Host-only de VirtualBox ──►   192.168.56.x
-```
-
-La página **Réplica** de la app (`/replica`) muestra el estado del maestro (archivo y posición
-del binlog), el del esclavo (hilos IO/SQL, retraso, último error) y compara cuántos registros
-tiene cada tabla en ambos servidores.
-
-Sin `DB_MOTOR=mariadb` la app usa SQLite (`db_local.sqlite3` + `db_replica.sqlite3`, la app copia
-cada escritura). Así funcionan las pruebas automáticas y los equipos que no tienen MariaDB.
-
-### 4.1 Maestro (PC con Windows)
-1. Instalar **MariaDB 11.4 LTS** (en esta PC ya está, como servicio `MariaDB` en el puerto **3307**
-   porque el 3306 lo usa MySQL 8):
-   ```powershell
-   winget install --id MariaDB.Server --version 11.4.3.0 --exact
-   ```
-2. En `C:\Program Files\MariaDB 11.4\data\my.ini`, sección `[mysqld]`, y reiniciar el servicio:
-   ```ini
-   port=3307
-   server_id=1
-   log_bin=mariadb-bin
-   binlog_format=ROW
-   ```
-3. Firewall: permitir el puerto 3307 desde la red de VirtualBox (como administrador):
-   ```powershell
-   New-NetFirewallRule -DisplayName "MariaDB 3307 VirtualBox" -Direction Inbound -Protocol TCP `
-     -LocalPort 3307 -RemoteAddress 192.168.56.0/24 -Profile Any -Action Allow
-   ```
-4. Base de datos y usuarios (como `root`; las contraseñas son las del `.env`):
-   ```sql
-   CREATE DATABASE chinos_cafe CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-   CREATE USER 'chinos_app'@'localhost' IDENTIFIED BY '<DB_PASSWORD>';
-   CREATE USER 'chinos_app'@'127.0.0.1' IDENTIFIED BY '<DB_PASSWORD>';
-   GRANT ALL PRIVILEGES ON chinos_cafe.* TO 'chinos_app'@'localhost', 'chinos_app'@'127.0.0.1';
-   GRANT BINLOG MONITOR ON *.* TO 'chinos_app'@'localhost', 'chinos_app'@'127.0.0.1';
-   CREATE USER 'replicador'@'%' IDENTIFIED BY '<REPLICACION_PASSWORD>';
-   GRANT REPLICATION SLAVE ON *.* TO 'replicador'@'%';
-   CREATE USER 'chinos_monitor'@'%' IDENTIFIED BY '<DB_REPLICA_PASSWORD>';
-   GRANT SLAVE MONITOR ON *.* TO 'chinos_monitor'@'%';
-   GRANT SELECT ON chinos_cafe.* TO 'chinos_monitor'@'%';
-   ```
-   Como el binlog se activó **antes** de crear la base, todo su historial (tablas, catálogo y
-   usuarios) está en el binlog y el esclavo lo copia completo al arrancar.
-5. En el `.env` de la PC: `DB_MOTOR=mariadb`, `DB_HOST`, `DB_PORT=3307`, `DB_NAME`, `DB_USER`,
-   `DB_PASSWORD` (ver `.env.example`). Al ejecutar `python app.py` se crean las tablas y el
-   catálogo inicial.
-
-### 4.2 Esclavo (máquina virtual Ubuntu en VirtualBox)
-> Recomendado: **Ubuntu Server 24.04 LTS** (soporte hasta 2029). Ubuntu 25.04 ya no tiene
-> soporte y `apt` puede fallar al instalar paquetes.
-
-1. **Red:** en VirtualBox → *Configuración* → *Red*, un adaptador en **Solo anfitrión
-   (Host-only)** → *VirtualBox Host-Only Ethernet Adapter*. En la VM, `ip -4 addr` muestra su IP
-   `192.168.56.x`; desde la VM, la PC es `192.168.56.1`. Comprobar: `nc -zv 192.168.56.1 3307`.
-2. **Instalar MariaDB 11.4** (misma versión que el maestro o más nueva) desde el repositorio
-   oficial:
-   ```bash
-   sudo apt update && sudo apt install -y curl
-   curl -LsS https://r.mariadb.com/downloads/mariadb_repo_setup | \
-     sudo bash -s -- --mariadb-server-version="mariadb-11.4"
-   sudo apt install -y mariadb-server
-   ```
-3. **Configurar como esclavo:** crear `/etc/mysql/mariadb.conf.d/60-replica.cnf`:
-   ```ini
-   [mysqld]
-   server_id = 2
-   read_only = 1
-   relay_log = relay-bin
-   replicate_ignore_db = chinos_cafe_test
-   bind-address = 0.0.0.0
-   ```
-   ```bash
-   sudo systemctl restart mariadb
-   sudo ufw allow from 192.168.56.0/24 to any port 3306 proto tcp   # si ufw está activo
-   ```
-4. **Conectar con el maestro y arrancar la réplica** (`sudo mariadb`):
-   ```sql
-   CHANGE MASTER TO
-     MASTER_HOST='192.168.56.1',
-     MASTER_PORT=3307,
-     MASTER_USER='replicador',
-     MASTER_PASSWORD='<REPLICACION_PASSWORD del .env de la PC>',
-     MASTER_USE_GTID=slave_pos;
-   START SLAVE;
-   SHOW SLAVE STATUS\G
-   ```
-   Debe mostrar `Slave_IO_Running: Yes`, `Slave_SQL_Running: Yes` y `Seconds_Behind_Master: 0`.
-   Comprobar los datos: `sudo mariadb -e "SELECT tipo, COUNT(*) FROM chinos_cafe.pizzas GROUP BY tipo;"`.
-5. **Ver el esclavo desde la app:** en el `.env` de la PC poner `DB_REPLICA_HOST=<IP de la VM>`
-   y abrir la página **Réplica**. Al crear un pedido en la PC, aparece en el esclavo al instante.
-
-> Si la VM está apagada, la app sigue funcionando con normalidad: al encenderla, el esclavo se
-> pone al día solo, leyendo del binlog lo que se perdió.
+## 4. Replicación de datos
+`database.py` implementa `replicate_write()`: toda escritura de **pedidos** y **pagos** se
+ejecuta primero en `db_local.sqlite3` y luego se replica automáticamente en
+`db_replica.sqlite3` (que en el escenario real correría en la máquina virtual/sucursal).
+Si la réplica falla, el pedido/pago igual queda guardado localmente y se muestra una
+advertencia (no se pierde la transacción).
 
 ## 5. Checklist para la sustentación / capturas
 - [ ] Captura de `/fabrica` con al menos 5 pizzas creadas (fecha/hora visible en el reloj del SO)
 - [ ] Captura de `/pedidos` creando un pedido y su JSON en la columna `pedidos.json_pedido`
-- [ ] Captura de la página **Réplica** con el esclavo «Replicando» y las tablas «Igual»
-- [ ] Captura de `SHOW SLAVE STATUS\G` en la VM y del mismo pedido consultado en el maestro y en el esclavo
+- [ ] Captura de `db_local.sqlite3` y `db_replica.sqlite3` mostrando el mismo registro (ej. con DB Browser for SQLite)
 - [ ] Captura de `/pagos` confirmando un pago y su JSON en la columna `pagos.json_pago`
 - [ ] Captura de NGINX corriendo (`systemctl status nginx`) y el sitio accesible por IP
 - [ ] Captura del `knockd` en acción (puerto cerrado → knock → puerto abierto → SSH exitoso)
