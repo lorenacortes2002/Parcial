@@ -19,18 +19,12 @@ class ProjectRequirementsTests(unittest.TestCase):
         root = Path(self.temp_dir.name)
         self.local_path = root / "local.sqlite3"
         self.replica_path = root / "replica.sqlite3"
-        self.pedidos_dir = root / "pedidos_json"
-        self.pagos_dir = root / "pagos_json"
 
         for name, value in (
             ("DB_LOCAL_PATH", str(self.local_path)),
             ("DB_REPLICA_PATH", str(self.replica_path)),
-            ("PEDIDOS_JSON_DIR", str(self.pedidos_dir)),
-            ("PAGOS_JSON_DIR", str(self.pagos_dir)),
         ):
-            patcher = mock.patch.object(
-                database if name.startswith("DB_") else utils, name, value
-            )
+            patcher = mock.patch.object(database, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
 
@@ -51,6 +45,12 @@ class ProjectRequirementsTests(unittest.TestCase):
             return conn.execute(query, params).fetchall()
         finally:
             conn.close()
+
+    def _order_json(self):
+        """JSON del primer pedido, tal como quedó guardado en la base de datos."""
+        return json.loads(
+            self._rows(self.local_path, "SELECT json_pedido FROM pedidos ORDER BY id")[0][0]
+        )
 
     def _delete_duo_combos(self):
         """Deja solo los cinco combos de una pizza para probar el mínimo."""
@@ -160,6 +160,10 @@ class ProjectRequirementsTests(unittest.TestCase):
         self.assertIn(b"Pedido #", response.data)
         # El JSON solo se envía por correo después del pago.
         self.assertEqual(self.mail_mock.call_count, 0)
+        # Al confirmar el pedido su JSON ya queda guardado en ambas bases.
+        for path in (self.local_path, self.replica_path):
+            stored = self._rows(path, "SELECT json_pedido FROM pedidos")[0][0]
+            self.assertEqual(json.loads(stored)["total"], 15.0)
 
         order = self._rows(
             self.local_path,
@@ -177,9 +181,7 @@ class ProjectRequirementsTests(unittest.TestCase):
             )[0],
             order,
         )
-        json_files = list(self.pedidos_dir.glob("*.json"))
-        self.assertEqual(len(json_files), 1)
-        order_json = json.loads(json_files[0].read_text(encoding="utf-8"))
+        order_json = self._order_json()
         self.assertEqual(order_json["id"], order[0])
         self.assertEqual(order_json["direccion"], order[4])
 
@@ -213,10 +215,28 @@ class ProjectRequirementsTests(unittest.TestCase):
         payment = self.client.post(f"/yappy/pagar/{codigo}", follow_redirects=True)
         self.assertIn("¡Pago realizado!".encode(), payment.data)
         self.assertEqual(self.mail_mock.call_count, 2)
-        sent_json = self.mail_mock.call_args.args[2]
-        self.assertEqual(sent_json["tipo"], "CONFIRMACION_PAGO")
-        self.assertEqual(sent_json["pedido"]["cantidad"], 2)
-        self.assertEqual(sent_json["direccion"], order[4])
+        # Los JSON del pedido y del pago se guardan (y replican) en la base de datos...
+        for path in (self.local_path, self.replica_path):
+            json_pedido, json_pago = self._rows(
+                path,
+                "SELECT pedidos.json_pedido, pagos.json_pago FROM pagos "
+                "JOIN pedidos ON pedidos.id = pagos.pedido_id",
+            )[0]
+            self.assertEqual(json.loads(json_pedido)["tipo"], "CONFIRMACION_PEDIDO")
+            self.assertEqual(json.loads(json_pago)["tipo"], "CONFIRMACION_PAGO")
+        # ...y el correo envía exactamente esos JSON guardados.
+        documentos = self.mail_mock.call_args.args[2]
+        self.assertEqual(
+            [nombre for nombre, _ in documentos],
+            [f"pedido_{order[0]}.json", "pago_1.json"],
+        )
+        self.assertEqual(documentos, [(f"pedido_{order[0]}.json", json_pedido),
+                                      ("pago_1.json", json_pago)])
+        sent_pedido = json.loads(documentos[0][1])
+        sent_pago = json.loads(documentos[1][1])
+        self.assertEqual(sent_pedido["id"], order[0])
+        self.assertEqual(sent_pago["pedido"]["cantidad"], 2)
+        self.assertEqual(sent_pago["direccion"], order[4])
         status = self.client.get(f"/pagos/yappy/{codigo}/estado").get_json()
         self.assertEqual(status["estado"], "PAGADO")
         self.assertTrue(status["referencia"].startswith("YAPPY-"))
@@ -426,9 +446,7 @@ class ProjectRequirementsTests(unittest.TestCase):
                 self._rows(path, "SELECT refresco, refresco_cantidad, refresco_tamano FROM pedidos"),
                 expected,
             )
-        order_json = json.loads(
-            next(self.pedidos_dir.glob("*.json")).read_text(encoding="utf-8")
-        )
+        order_json = self._order_json()
         self.assertEqual(
             order_json["refrescos_detalle"],
             [{"sabor": "Coca-Cola", "cantidad": 2}, {"sabor": "Sprite", "cantidad": 1}],
@@ -668,7 +686,7 @@ class ProjectRequirementsTests(unittest.TestCase):
                     (duo, 1, "Ninguno", 0.0, 12.5),
                 ],
             )
-        order_json = json.loads(next(self.pedidos_dir.glob("*.json")).read_text(encoding="utf-8"))
+        order_json = self._order_json()
         self.assertEqual(len(order_json["items"]), 3)
         self.assertEqual(order_json["total"], 35.5)
 
@@ -697,6 +715,15 @@ class ProjectRequirementsTests(unittest.TestCase):
         }, follow_redirects=True)
         self.assertIn("solo está disponible para retiro en sitio".encode(), to_home.data)
         self.assertEqual(self._rows(self.local_path, "SELECT COUNT(*) FROM pedidos")[0][0], 0)
+
+    def test_json_is_stored_only_in_the_database(self):
+        self.client.post("/pedidos", data={
+            "cliente": "Ana", "correo_cliente": "ana@example.com", "pizza_id": "1",
+            "cantidad": "1", "retiro_o_flete": "RETIRO EN SITIO", "refresco_cantidad": "0",
+        })
+        self.assertFalse(hasattr(utils, "PEDIDOS_JSON_DIR"))
+        self.assertFalse(hasattr(utils, "PAGOS_JSON_DIR"))
+        self.assertEqual(self._order_json()["tipo"], "CONFIRMACION_PEDIDO")
 
     def test_unknown_yappy_code_is_handled(self):
         self.assertEqual(self.client.get("/yappy/pagar/CC-NOPE00").status_code, 404)

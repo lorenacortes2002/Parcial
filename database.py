@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS pedidos (
     direccion TEXT,                             -- obligatoria solo si es FLETE A DOMICILIO
     fecha TEXT NOT NULL,
     detalle TEXT,                               -- resumen: "2× Combo Hawaiana, 1× Pizza Margarita"
+    json_pedido TEXT,                           -- JSON de confirmación del pedido
     FOREIGN KEY (pizza_id) REFERENCES pizzas(id)
 );
 
@@ -61,6 +62,7 @@ CREATE TABLE IF NOT EXISTS pagos (
     monto REAL NOT NULL,
     estado TEXT NOT NULL DEFAULT 'CONFIRMADO',
     fecha TEXT NOT NULL,
+    json_pago TEXT,                             -- JSON de confirmación del pago
     FOREIGN KEY (pedido_id) REFERENCES pedidos(id)
 );
 
@@ -108,6 +110,10 @@ def _migrate(conn):
         conn.execute("ALTER TABLE pedidos ADD COLUMN refresco_tamano TEXT")
     if "detalle" not in columnas:
         conn.execute("ALTER TABLE pedidos ADD COLUMN detalle TEXT")
+    if "json_pedido" not in columnas:
+        conn.execute("ALTER TABLE pedidos ADD COLUMN json_pedido TEXT")
+    if "json_pago" not in {row["name"] for row in conn.execute("PRAGMA table_info(pagos)")}:
+        conn.execute("ALTER TABLE pagos ADD COLUMN json_pago TEXT")
     columnas = {row["name"] for row in conn.execute("PRAGMA table_info(pizzas)")}
     if "entrega" not in columnas:
         conn.execute("ALTER TABLE pizzas ADD COLUMN entrega TEXT NOT NULL DEFAULT 'AMBOS'")

@@ -8,5 +8,3 @@ __pycache__/
 .env.*
 !.env.example
 correos_enviados.log
-pedidos_json/*.json
-pagos_json/*.json

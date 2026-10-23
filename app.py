@@ -27,7 +27,7 @@ from flask import (
 
 import database
 from utils import (
-    generar_json_pedido, generar_json_pago,
+    generar_json_pedido, generar_json_pago, json_texto,
     enviar_correo, simular_pago_yappy, EMPRESA_CORREO,
     generar_codigo_cobro, qr_svg, YAPPY_TELEFONO, YAPPY_DIRECTORIO,
 )
@@ -264,25 +264,25 @@ def _fabrica_form_context(pizza, tipo_actual, entrega_actual, ingredientes_actua
     )
 
 
-def _notify_json_recipients(recipients, subject, json_data, ruta_json):
-    if not ruta_json:
+def _enviar_jsons_por_correo(recipients, subject, documentos):
+    """Envía los JSON (leídos de la base de datos) a cada destinatario."""
+    if not documentos:
         flash(
-            "La transacción quedó guardada, pero no se pudo crear su archivo JSON; "
+            "La transacción quedó guardada, pero no hay JSON guardado en la base de datos; "
             "no se intentó enviar el correo.",
             "warning",
         )
         return
 
     results = [
-        enviar_correo(destinatario, subject, json_data, ruta_json)
-        for destinatario in recipients
+        enviar_correo(destinatario, subject, documentos) for destinatario in recipients
     ]
     if all(sent for sent, _ in results):
-        flash("Archivo JSON creado y correos de confirmación enviados.", "success")
+        flash("JSON guardado en la base de datos y correos de confirmación enviados.", "success")
     else:
         flash(
-            "Archivo JSON creado y transacción guardada, pero no se pudieron enviar "
-            "todos los correos. Verifique la configuración SMTP y el log.",
+            "JSON guardado en la base de datos y transacción registrada, pero no se pudieron "
+            "enviar todos los correos. Verifique la configuración SMTP y el log.",
             "warning",
         )
 
@@ -697,23 +697,6 @@ def pedidos():
             if error:
                 flash(error, "warning")
 
-            ok, _, error = database.replicate_transaction([
-                (
-                    "INSERT INTO pedido_items (pedido_id, pizza_id, cantidad, precio_unitario, "
-                    "sodas, sodas_cantidad, sodas_tamano, precio_sodas, subtotal) "
-                    "VALUES (?,?,?,?,?,?,?,?,?)",
-                    (pedido_id, l["pizza_id"], l["cantidad"], l["producto"]["precio"],
-                     l["sodas"], l["sodas_cantidad"], l["sodas_tamano"],
-                     l["precio_sodas"], l["subtotal"]),
-                )
-                for l in lineas
-            ])
-            if not ok:
-                database.replicate_write("DELETE FROM pedidos WHERE id=?", (pedido_id,))
-                raise RuntimeError(error)
-            if error:
-                flash(error, "warning")
-
             pedido_dict = {
                 "id": pedido_id, "cliente": cliente, "correo_cliente": correo_cliente,
                 "pizza_nombre": detalle, "refresco": refresco,
@@ -736,11 +719,32 @@ def pedidos():
                 "total": total, "retiro_o_flete": retiro_o_flete,
                 "direccion": direccion, "estado": "CONFIRMADO", "fecha": fecha,
             }
-            # El JSON del pedido queda registrado, pero solo se envía por correo
-            # (junto con el pago) cuando el pedido se paga.
-            _, ruta_json = generar_json_pedido(pedido_dict)
-            if not ruta_json:
-                flash("No se pudo crear el archivo JSON del pedido.", "warning")
+            # El JSON del pedido se guarda en la base de datos junto con sus
+            # productos; solo se envía por correo al pagarlo.
+            json_pedido = generar_json_pedido(pedido_dict)
+
+            ok, _, error = database.replicate_transaction([
+                *[
+                    (
+                        "INSERT INTO pedido_items (pedido_id, pizza_id, cantidad, precio_unitario, "
+                        "sodas, sodas_cantidad, sodas_tamano, precio_sodas, subtotal) "
+                        "VALUES (?,?,?,?,?,?,?,?,?)",
+                        (pedido_id, l["pizza_id"], l["cantidad"], l["producto"]["precio"],
+                         l["sodas"], l["sodas_cantidad"], l["sodas_tamano"],
+                         l["precio_sodas"], l["subtotal"]),
+                    )
+                    for l in lineas
+                ],
+                (
+                    "UPDATE pedidos SET json_pedido=? WHERE id=?",
+                    (json_texto(json_pedido), pedido_id),
+                ),
+            ])
+            if not ok:
+                database.replicate_write("DELETE FROM pedidos WHERE id=?", (pedido_id,))
+                raise RuntimeError(error)
+            if error:
+                flash(error, "warning")
             flash(
                 "Recibirás la confirmación en JSON por correo cuando se realice el pago.",
                 "success",
@@ -886,11 +890,38 @@ def _confirmar_cobro(cobro, pedido, referencia):
         "retiro_o_flete": pedido["retiro_o_flete"], "direccion": pedido["direccion"],
         "fecha": pedido["fecha"],
     }
-    json_data, ruta_json = generar_json_pago(pago_dict, pedido_dict)
-    _notify_json_recipients(
+    json_pago = generar_json_pago(pago_dict, pedido_dict)
+    ok, _, error = database.replicate_write(
+        "UPDATE pagos SET json_pago=? WHERE id=?", (json_texto(json_pago), pago_dict["id"])
+    )
+    if not ok:
+        flash(f"El pago quedó registrado, pero no se pudo guardar su JSON: {error}", "warning")
+    elif error:
+        flash(error, "warning")
+
+    # Se envían por correo los JSON del pedido y del pago tal como están
+    # guardados en la base de datos.
+    conn = database.get_local_conn()
+    try:
+        guardados = conn.execute(
+            "SELECT pedidos.json_pedido, pagos.json_pago FROM pagos "
+            "JOIN pedidos ON pedidos.id = pagos.pedido_id WHERE pagos.id=?",
+            (pago_dict["id"],),
+        ).fetchone()
+    finally:
+        conn.close()
+    documentos = [
+        (nombre, texto)
+        for nombre, texto in (
+            (f"pedido_{pedido['id']}.json", guardados["json_pedido"] if guardados else None),
+            (f"pago_{pago_dict['id']}.json", guardados["json_pago"] if guardados else None),
+        )
+        if texto
+    ]
+    _enviar_jsons_por_correo(
         (pedido["correo_cliente"], EMPRESA_CORREO),
         f"Confirmación de pago - Pedido #{pedido['id']}",
-        json_data, ruta_json,
+        documentos,
     )
 
 

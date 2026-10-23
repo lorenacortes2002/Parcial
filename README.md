@@ -12,8 +12,6 @@ chinos_cafe/
 ├── templates/            # Vistas HTML (Jinja2)
 ├── static/style.css
 ├── tests/                 # Pruebas automatizadas de los requisitos del prototipo
-├── pedidos_json/         # Se generan automáticamente los JSON de cada pedido
-├── pagos_json/           # Se generan automáticamente los JSON de cada pago
 ├── db_local.sqlite3      # Se crea al primer arranque (BD relacional local)
 ├── db_replica.sqlite3    # Se crea al primer arranque (BD de réplica / VM Veraguas)
 └── correos_enviados.log  # Registro de cada intento de envío de correo
@@ -44,7 +42,8 @@ Abrir **http://127.0.0.1:5000**
   botella 20 oz $1.50, 1 litro $2.25, 2 litros $3.00); cada combo incluye una lata, así que con un
   tamaño mayor se paga la diferencia y las sodas extra se cobran completas. Al confirmar, el pedido
   y sus productos (`pedido_items`) se guardan en `db_local.sqlite3`, se **replican** en
-  `db_replica.sqlite3` y se genera un JSON en `pedidos_json/`. El correo **no** se envía todavía: se envía al confirmarse el pago.
+  `db_replica.sqlite3`. Su JSON se guarda en la base de datos (columna `pedidos.json_pedido`, también
+  replicada); no se crean archivos JSON. El correo **no** se envía todavía: se envía al confirmarse el pago.
   Si se elige **Flete a domicilio** aparece el campo **Dirección de entrega**, que es obligatorio
   y se guarda en el pedido, su JSON y los correos.
 - `/pagos` → Genera un **cobro Yappy** con un código único (p. ej. `CC-7K3P9Q`) y abre
@@ -54,8 +53,9 @@ Abrir **http://127.0.0.1:5000**
      «¡Pago confirmado!» automáticamente.
   2. **Número Yappy**: el cliente envía el monto al número del comercio con el código en el mensaje;
      el cajero anota el número de transacción recibido y confirma.
-  Al confirmar se genera el JSON en `pagos_json/` (con el detalle del pedido), se **envía por correo**
-  al cliente y a la empresa, y el pedido pasa a `PAGADO` (o `PAGADO - DESPACHAR (FLETE)` si eligió flete).
+  Al confirmar se genera el JSON del pago, se guarda en la base de datos (`pagos.json_pago`) y se
+  **envían por correo** al cliente y a la empresa los JSON del pedido y del pago
+  tal como están guardados en la base de datos, y el pedido pasa a `PAGADO` (o `PAGADO - DESPACHAR (FLETE)` si eligió flete).
   Si no hay servidor SMTP configurado, el envío queda registrado en `correos_enviados.log` y el sitio avisa. Un pedido pagado no se puede cobrar dos veces.
   El número y el nombre de directorio se configuran con `YAPPY_TELEFONO` y `YAPPY_DIRECTORIO`.
   Para escanear el QR con un celular, este debe estar en la misma red Wi-Fi que la computadora.
@@ -188,8 +188,8 @@ advertencia (no se pierde la transacción).
 
 ## 5. Checklist para la sustentación / capturas
 - [ ] Captura de `/fabrica` con al menos 5 pizzas creadas (fecha/hora visible en el reloj del SO)
-- [ ] Captura de `/pedidos` creando un pedido y el JSON generado en `pedidos_json/`
+- [ ] Captura de `/pedidos` creando un pedido y su JSON en la columna `pedidos.json_pedido`
 - [ ] Captura de `db_local.sqlite3` y `db_replica.sqlite3` mostrando el mismo registro (ej. con DB Browser for SQLite)
-- [ ] Captura de `/pagos` confirmando un pago y el JSON en `pagos_json/`
+- [ ] Captura de `/pagos` confirmando un pago y su JSON en la columna `pagos.json_pago`
 - [ ] Captura de NGINX corriendo (`systemctl status nginx`) y el sitio accesible por IP
 - [ ] Captura del `knockd` en acción (puerto cerrado → knock → puerto abierto → SSH exitoso)

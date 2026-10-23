@@ -2,9 +2,10 @@
 utils.py
 -------------------------------------------------
 Funciones auxiliares:
-  - generar_json_pedido / generar_json_pago: crean el archivo JSON que
-    se "envía" por correo electrónico a la empresa/cliente/operario.
-  - enviar_correo: intenta enviar el JSON por SMTP; si no hay servidor
+  - generar_json_pedido / generar_json_pago: crean el JSON del pedido y del
+    pago, que se guarda (como texto) en la base de datos.
+  - json_texto: convierte el JSON a texto para guardarlo en la base de datos.
+  - enviar_correo: intenta enviar los JSON por SMTP; si no hay servidor
     de correo configurado (entorno de prueba/local), captura el error
     con try/except y deja constancia en un log, sin tumbar la app.
   - generar_codigo_cobro / qr_svg: crean el código del cobro Yappy y su QR.
@@ -22,8 +23,6 @@ from datetime import datetime
 import segno
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PEDIDOS_JSON_DIR = os.path.join(BASE_DIR, "pedidos_json")
-PAGOS_JSON_DIR = os.path.join(BASE_DIR, "pagos_json")
 LOG_PATH = os.path.join(BASE_DIR, "correos_enviados.log")
 
 # --- Configuración SMTP (editar con los datos reales del servidor) -------
@@ -38,17 +37,9 @@ YAPPY_TELEFONO = os.environ.get("YAPPY_TELEFONO", "6123-4567")
 YAPPY_DIRECTORIO = os.environ.get("YAPPY_DIRECTORIO", "@ChinosCafe")
 
 
-def _guardar_json(data, carpeta, prefijo):
-    try:
-        os.makedirs(carpeta, exist_ok=True)
-        nombre = f"{prefijo}_{data['id']}_{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
-        ruta = os.path.join(carpeta, nombre)
-        with open(ruta, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-        return ruta
-    except (OSError, TypeError, ValueError) as e:
-        print(f"[ERROR JSON] No se pudo guardar el archivo JSON: {e}")
-        return None
+def json_texto(data):
+    """Texto JSON que se guarda en la base de datos y se adjunta al correo."""
+    return json.dumps(data, ensure_ascii=False, indent=4)
 
 
 def generar_json_pedido(pedido):
@@ -70,7 +61,7 @@ def generar_json_pedido(pedido):
         "estado": pedido["estado"],
         "fecha": pedido["fecha"],
     }
-    return data, _guardar_json(data, PEDIDOS_JSON_DIR, "pedido")
+    return data
 
 
 def generar_json_pago(pago, pedido):
@@ -94,12 +85,13 @@ def generar_json_pago(pago, pedido):
             "fecha": pedido.get("fecha"),
         },
     }
-    return data, _guardar_json(data, PAGOS_JSON_DIR, "pago")
+    return data
 
 
-def enviar_correo(destinatario, asunto, json_data, ruta_json):
+def enviar_correo(destinatario, asunto, documentos):
     """
-    Intenta enviar el archivo JSON adjunto por correo electrónico.
+    Intenta enviar por correo electrónico los JSON guardados en la base de
+    datos. `documentos` es una lista de (nombre_de_archivo, texto_json).
     Si no hay un servidor SMTP disponible (caso típico en pruebas locales),
     el error se captura y se registra en un log, sin interrumpir el flujo
     de la aplicación (requisito de control Try-Catch del examen).
@@ -111,15 +103,16 @@ def enviar_correo(destinatario, asunto, json_data, ruta_json):
         msg["Subject"] = asunto
         msg["From"] = EMPRESA_CORREO
         msg["To"] = destinatario
+        cuerpo = "\n\n".join(f"--- {nombre} ---\n{texto}" for nombre, texto in documentos)
         msg.set_content(
-            f"Se adjunta la confirmación en formato JSON.\n\n{json.dumps(json_data, indent=2, ensure_ascii=False)}"
+            "Se adjunta la confirmación de su pedido y de su pago en formato JSON."
+            f"\n\n{cuerpo}"
         )
-        if ruta_json and os.path.exists(ruta_json):
-            with open(ruta_json, "rb") as f:
-                msg.add_attachment(
-                    f.read(), maintype="application", subtype="json",
-                    filename=os.path.basename(ruta_json)
-                )
+        for nombre, texto in documentos:
+            msg.add_attachment(
+                texto.encode("utf-8"), maintype="application", subtype="json",
+                filename=nombre,
+            )
 
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=5) as server:
             if SMTP_USER:
