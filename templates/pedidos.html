@@ -22,7 +22,7 @@
     <div class="form-field">
       <label for="pizza-id">Combo o pizza</label>
       <select id="pizza-id" name="pizza_id" required aria-describedby="pizza-help">
-        {% for tipo, etiqueta in (('COMBO', 'Combos (con soda)'), ('PIZZA', 'Pizzas individuales')) %}
+        {% for tipo, etiqueta in (('COMBO', 'Combos (con soda)'), ('DUO', 'Combos de 2 pizzas (con soda)'), ('PIZZA', 'Pizzas individuales')) %}
           {% set grupo = pizzas | selectattr('tipo', 'equalto', tipo) | list %}
           {% if grupo %}
           <optgroup label="{{ etiqueta }}">

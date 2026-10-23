@@ -29,13 +29,15 @@ python app.py
 ```
 Abrir **http://127.0.0.1:5000**
 
-- `/` → Menú público, separado en **Combos** (pizza + soda) y **Pizzas individuales**.
+- `/` → Menú público, separado en **Combos** (pizza + soda), **Combos de 2 pizzas** y **Pizzas individuales**.
 - Cada botón «Pedir» conserva la pizza elegida y el resumen del pedido actualiza el subtotal en pantalla.
-- `/fabrica` → CRUD de productos (crear, editar, eliminar). Al crear se elige **Combo** (incluye una soda)
-  o **Pizza individual** (sin soda). Cada pizza lleva de 1 a 10 ingredientes; el queso mozzarella es la
+- `/fabrica` → CRUD de productos (crear, editar, eliminar). Al crear se elige **Combo** (incluye una soda),
+  **Combo de 2 pizzas** (dos pizzas individuales diferentes + soda) o **Pizza individual** (sin soda).
+  Una pizza que forma parte de un combo de 2 pizzas no se puede eliminar. Cada pizza lleva de 1 a 10 ingredientes; el queso mozzarella es la
   base de todas, por eso no aparece en la lista.
-- El catálogo inicia con cinco combos y tres pizzas individuales; no permite eliminar (ni convertir en
-  pizza) un combo si quedarían menos de cinco.
+- El catálogo inicia con cinco combos, la versión individual de cada uno, tres pizzas individuales más
+  (Margarita, Pepperoni, Jamón y Champiñones) y tres combos de 2 pizzas que las combinan. No permite
+  eliminar (ni convertir en pizza) un combo si quedarían menos de cinco (cuentan ambos tipos de combo).
 - `/pedidos` → El cliente elige un combo o una pizza (solo los combos muestran la sección de sodas);
   se guarda en `db_local.sqlite3`, se **replica** en `db_replica.sqlite3` y se genera un JSON en
   `pedidos_json/`. El correo **no** se envía todavía: se envía al confirmarse el pago.

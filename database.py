@@ -31,7 +31,9 @@ CREATE TABLE IF NOT EXISTS pizzas (
     refresco TEXT,
     precio REAL NOT NULL DEFAULT 5.00,
     entrega TEXT NOT NULL DEFAULT 'AMBOS',  -- AMBOS / RETIRO EN SITIO / FLETE A DOMICILIO
-    tipo TEXT NOT NULL DEFAULT 'COMBO'      -- COMBO (incluye soda) / PIZZA (individual)
+    tipo TEXT NOT NULL DEFAULT 'COMBO',     -- COMBO / DUO (2 pizzas + soda) / PIZZA (individual)
+    pizza1_id INTEGER REFERENCES pizzas(id),  -- solo DUO: las dos pizzas individuales
+    pizza2_id INTEGER REFERENCES pizzas(id)
 );
 
 CREATE TABLE IF NOT EXISTS pedidos (
@@ -92,6 +94,11 @@ def _migrate(conn):
         conn.execute("ALTER TABLE pizzas ADD COLUMN entrega TEXT NOT NULL DEFAULT 'AMBOS'")
     if "tipo" not in columnas:
         conn.execute("ALTER TABLE pizzas ADD COLUMN tipo TEXT NOT NULL DEFAULT 'COMBO'")
+    for columna in ("pizza1_id", "pizza2_id"):
+        if columna not in columnas:
+            conn.execute(
+                f"ALTER TABLE pizzas ADD COLUMN {columna} INTEGER REFERENCES pizzas(id)"
+            )
     try:
         # Un pedido solo puede tener un pago: evita cobros dobles simultáneos.
         conn.execute(
@@ -137,8 +144,8 @@ def init_db():
             if conn is not None:
                 conn.close()
 
-    # Garantiza cinco combos y algunas pizzas individuales iniciales, y replica
-    # el catálogo con sus mismos IDs. El queso mozzarella es la base de todas
+    # Garantiza el catálogo inicial (cinco combos, sus versiones individuales,
+    # otras pizzas individuales y combos de 2 pizzas) y lo replica con sus mismos IDs. El queso mozzarella es la base de todas
     # las pizzas, por eso no aparece en la lista de ingredientes.
     try:
         conn = get_local_conn()
@@ -151,6 +158,19 @@ def init_db():
             ("Margarita", "salsa de tomate", None, 5.50, "PIZZA"),
             ("Pepperoni", "pepperoni", None, 6.00, "PIZZA"),
             ("Jamón y Champiñones", "jamón,champiñones", None, 6.50, "PIZZA"),
+            # Las pizzas de los combos también se venden solas (sin soda).
+            ("Pepperoni Clásica", "pepperoni,salsa de tomate", None, 6.00, "PIZZA"),
+            ("Hawaiana", "jamón,piña,salsa de tomate", None, 6.25, "PIZZA"),
+            ("Vegetariana", "pimentón,cebolla,champiñones,aceitunas", None, 5.75, "PIZZA"),
+            ("Suprema Chinos", "pepperoni,jamón,champiñones,pimentón,cebolla", None, 7.40, "PIZZA"),
+            ("Cuatro Quesos", "parmesano,queso azul,gouda", None, 7.00, "PIZZA"),
+        ]
+        # Combos de 2 pizzas individuales diferentes con soda:
+        # (nombre, pizza 1, pizza 2, soda, precio)
+        demo_duos = [
+            ("Dúo Margarita + Pepperoni", "Margarita", "Pepperoni", "Coca-Cola", 12.50),
+            ("Dúo Pepperoni + Jamón y Champiñones", "Pepperoni", "Jamón y Champiñones", "Sprite", 13.50),
+            ("Dúo Jamón y Champiñones + Margarita", "Jamón y Champiñones", "Margarita", "Fanta", 13.00),
         ]
         # Versiones anteriores incluían "queso mozzarella" (o "mozzarella")
         # como ingrediente: se quita porque ya es la base de todas las pizzas.
@@ -168,18 +188,31 @@ def init_db():
                     "UPDATE pizzas SET ingredientes=? WHERE id=?",
                     (",".join(restantes), row["id"]),
                 )
-        existing_names = {
-            row["nombre"] for row in conn.execute("SELECT nombre FROM pizzas").fetchall()
+        # Un mismo nombre puede existir como combo y como pizza individual.
+        existentes = {
+            (row["nombre"], row["tipo"])
+            for row in conn.execute("SELECT nombre, tipo FROM pizzas").fetchall()
         }
         for pizza in demo_pizzas:
-            if pizza[0] not in existing_names:
+            if (pizza[0], pizza[4]) not in existentes:
                 conn.execute(
                     "INSERT INTO pizzas (nombre, ingredientes, refresco, precio, tipo) "
                     "VALUES (?,?,?,?,?)",
                     pizza,
                 )
+        individuales = {
+            row["nombre"]: row["id"]
+            for row in conn.execute("SELECT id, nombre FROM pizzas WHERE tipo='PIZZA'")
+        }
+        for nombre, pizza1, pizza2, soda, precio in demo_duos:
+            if (nombre, "DUO") not in existentes and pizza1 in individuales and pizza2 in individuales:
+                conn.execute(
+                    "INSERT INTO pizzas (nombre, ingredientes, refresco, precio, tipo, "
+                    "pizza1_id, pizza2_id) VALUES (?, '', ?, ?, 'DUO', ?, ?)",
+                    (nombre, soda, precio, individuales[pizza1], individuales[pizza2]),
+                )
         conn.commit()
-        pizzas = conn.execute("SELECT * FROM pizzas").fetchall()
+        pizzas = conn.execute("SELECT * FROM pizzas ORDER BY id").fetchall()
         conn.close()
 
         replica_conn = get_replica_conn()
@@ -188,20 +221,23 @@ def init_db():
                 for pizza in pizzas:
                     replica_conn.execute(
                         """
-                        INSERT INTO pizzas (id, nombre, ingredientes, refresco, precio, entrega, tipo)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO pizzas (id, nombre, ingredientes, refresco, precio, entrega, tipo,
+                                            pizza1_id, pizza2_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(id) DO UPDATE SET
                             nombre=excluded.nombre,
                             ingredientes=excluded.ingredientes,
                             refresco=excluded.refresco,
                             precio=excluded.precio,
                             entrega=excluded.entrega,
-                            tipo=excluded.tipo
+                            tipo=excluded.tipo,
+                            pizza1_id=excluded.pizza1_id,
+                            pizza2_id=excluded.pizza2_id
                         """,
                         (
                             pizza["id"], pizza["nombre"], pizza["ingredientes"],
                             pizza["refresco"], pizza["precio"], pizza["entrega"],
-                            pizza["tipo"],
+                            pizza["tipo"], pizza["pizza1_id"], pizza["pizza2_id"],
                         ),
                     )
         finally:

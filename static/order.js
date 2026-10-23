@@ -89,7 +89,8 @@ if (pizzaSelect && quantityInput && deliverySelect) {
   };
 
   const sodaPicker = document.querySelector("#soda-picker");
-  const isCombo = () => pizzaSelect.selectedOptions[0]?.dataset.tipo === "COMBO";
+  // Los combos de una y de dos pizzas incluyen sodas; las pizzas individuales no.
+  const isCombo = () => (pizzaSelect.selectedOptions[0]?.dataset.tipo ?? "PIZZA") !== "PIZZA";
 
   const updateSodas = () => {
     // Solo los combos incluyen sodas: con una pizza individual la sección se

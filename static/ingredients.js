@@ -26,17 +26,39 @@ if (select) {
   update();
 }
 
-// Solo los combos incluyen soda: el campo se oculta para pizzas individuales.
+// Cada tipo de producto muestra solo sus campos: ingredientes (combo y pizza),
+// las dos pizzas (combo de 2 pizzas) y la soda (ambos combos). Los campos
+// ocultos se desactivan para que no se validen ni se envíen.
 const typeRadios = document.querySelectorAll('input[name="tipo"]');
-const comboSoda = document.querySelector("#combo-soda");
+const typeBlocks = document.querySelectorAll(".type-block");
 
-if (typeRadios.length && comboSoda) {
-  const sodaSelect = comboSoda.querySelector("select");
+if (typeRadios.length) {
   const applyType = () => {
-    const isCombo = document.querySelector('input[name="tipo"]:checked')?.value === "COMBO";
-    comboSoda.hidden = !isCombo;
-    sodaSelect.disabled = !isCombo;
+    const tipo = document.querySelector('input[name="tipo"]:checked')?.value;
+    typeBlocks.forEach((block) => {
+      const visible = block.dataset.tipos.split(" ").includes(tipo);
+      block.hidden = !visible;
+      block.querySelectorAll("input, select, textarea").forEach((field) => {
+        field.disabled = !visible;
+      });
+    });
   };
   typeRadios.forEach((radio) => radio.addEventListener("change", applyType));
   applyType();
+}
+
+// En el combo de 2 pizzas no se puede elegir la misma pizza dos veces.
+const duoSelects = [...document.querySelectorAll(".duo-pizza")];
+
+if (duoSelects.length === 2) {
+  const syncDuo = () => {
+    duoSelects.forEach((select, i) => {
+      const other = duoSelects[1 - i].value;
+      [...select.options].forEach((option) => {
+        option.disabled = option.value !== "" && option.value === other;
+      });
+    });
+  };
+  duoSelects.forEach((select) => select.addEventListener("change", syncDuo));
+  syncDuo();
 }

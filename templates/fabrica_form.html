@@ -4,7 +4,7 @@
 <div class="page-heading">
   <p class="eyebrow">Administración del menú</p>
   <h1>{{ 'Editar producto' if pizza and pizza.id else 'Crear un producto' }}</h1>
-  <p>Elige si es un combo (pizza + soda) o una pizza individual, y define sus ingredientes y precio.</p>
+  <p>Elige si es un combo (pizza + soda), un combo de 2 pizzas o una pizza individual, y define su contenido y precio.</p>
 </div>
 
 <div class="form-card">
@@ -12,12 +12,12 @@
   <fieldset class="type-picker">
     <legend>¿Qué deseas crear?</legend>
     <div class="type-options">
-      {% for valor, texto in tipos_producto.items() %}
+      {% for valor, (titulo, detalle) in tipos_producto.items() %}
         <label class="type-option">
           <input type="radio" name="tipo" value="{{ valor }}" {% if tipo_actual == valor %}checked{% endif %}>
           <span>
-            <strong>{{ 'Combo' if valor == 'COMBO' else 'Pizza individual' }}</strong>
-            <small>{{ 'Pizza con soda incluida' if valor == 'COMBO' else 'Solo la pizza, sin soda' }}</small>
+            <strong>{{ titulo }}</strong>
+            <small>{{ detalle }}</small>
           </span>
         </label>
       {% endfor %}
@@ -27,6 +27,7 @@
   <label for="nombre">Nombre</label>
   <input id="nombre" type="text" name="nombre" required value="{{ pizza.nombre if pizza and pizza.nombre else request.form.get('nombre', '') }}">
 
+  <div id="ingredients-block" class="type-block" data-tipos="COMBO PIZZA">
   <label for="ingredientes">Ingredientes (seleccione entre {{ min_ing }} y {{ max_ing }})</label>
   <select id="ingredientes" name="ingredientes" multiple size="8" required
     data-min="{{ min_ing }}" data-max="{{ max_ing }}" aria-describedby="ingredient-help">
@@ -42,8 +43,31 @@
     <strong id="ingredient-count" class="pick-count">0 / {{ max_ing }}</strong>
   </small>
   <p id="ingredient-summary" class="ingredient-summary" aria-live="polite"></p>
+  </div>
 
-  <div id="combo-soda" class="combo-only">
+  <div id="duo-block" class="type-block" data-tipos="DUO">
+    {% if pizzas_individuales|length < 2 %}
+      <p class="form-note">Necesitas al menos dos pizzas individuales en el menú para armar este combo.</p>
+    {% endif %}
+    <div class="form-grid">
+      {% for campo in ('pizza1_id', 'pizza2_id') %}
+        <div class="form-field">
+          <label for="{{ campo }}">{{ 'Primera' if loop.first else 'Segunda' }} pizza</label>
+          <select id="{{ campo }}" name="{{ campo }}" class="duo-pizza" required>
+            <option value="">Elige una pizza individual</option>
+            {% for ind in pizzas_individuales %}
+              <option value="{{ ind.id }}" {% if pizza and pizza[campo] == ind.id %}selected{% endif %}>
+                {{ ind.nombre }} — ${{ "%.2f"|format(ind.precio) }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+      {% endfor %}
+    </div>
+    <small>Las dos pizzas deben ser diferentes; sus ingredientes se toman de cada pizza.</small>
+  </div>
+
+  <div id="combo-soda" class="type-block" data-tipos="COMBO DUO">
     <label for="refresco">Soda incluida en el combo</label>
     <select id="refresco" name="refresco">
       {% for r in sabores_soda %}

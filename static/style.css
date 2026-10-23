@@ -278,12 +278,17 @@ main.container { animation: content-enter .55s cubic-bezier(.2, .7, .25, 1) both
 .entrega-badge { color: #2f5a44; background: #e6efe7; }
 .tipo-combo { color: #8a3b22; background: #fbe7dc; }
 .tipo-pizza { color: #5b4a1c; background: #f3ead2; }
+.tipo-duo { color: #5a2d6b; background: #efe3f4; }
+.duo-parts { margin: 0 0 6px; padding: 0; list-style: none; }
+.duo-parts li { margin: 0 0 6px; color: var(--muted); font-size: .9rem; line-height: 1.45; }
+.duo-parts strong { color: var(--ink); }
+.menu-subtitle { margin: 40px 0 16px; font-size: 1.35rem; }
 .menu-section + .menu-section { margin-top: 56px; }
 
 /* --- Tipo de producto en la Fábrica ---------------------------------- */
 .type-picker { margin: 0 0 6px; padding: 0; border: 0; }
 .type-picker legend { margin-bottom: 10px; padding: 0; color: #373b34; font-size: .9rem; font-weight: 700; }
-.type-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.type-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .form .type-option {
   position: relative;
   display: flex;
@@ -409,8 +414,8 @@ main.container { animation: content-enter .55s cubic-bezier(.2, .7, .25, 1) both
 .ingredient-summary { min-height: 1.2em; margin: 0; color: var(--green); font-size: .85rem; font-weight: 600; text-transform: capitalize; }
 .soda-picker { margin: 4px 0 0; padding: 18px 18px 20px; border: 1px solid var(--line); border-radius: 14px; background: #fdfbf7; }
 .soda-picker legend { padding: 0 6px; color: #373b34; font-size: .95rem; font-weight: 700; }
-.soda-picker[hidden], .soda-detail[hidden], .soda-split__row[hidden], .combo-only[hidden] { display: none; }
-.combo-only { display: flex; flex-direction: column; gap: 10px; }
+.soda-picker[hidden], .soda-detail[hidden], .soda-split__row[hidden], .type-block[hidden] { display: none; }
+.type-block { display: flex; flex-direction: column; gap: 10px; }
 .soda-split__title { color: #373b34; font-size: .9rem; font-weight: 700; }
 .soda-split__rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
 .form .soda-split__row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0; padding: 6px 6px 6px 12px; border: 1px solid #cfe0d1; border-radius: 10px; background: #edf4ee; font-weight: 600; animation: content-enter .25s ease-out both; }

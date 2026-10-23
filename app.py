@@ -114,11 +114,14 @@ def _describir_sodas(cantidad, tamano, detalle):
     return f"{sabores} ({TAMANOS_SODA[tamano]})"
 
 
-# Tipos de producto de la Fábrica: solo los combos incluyen soda.
+# Tipos de producto de la Fábrica. Los combos (de una o de dos pizzas)
+# incluyen soda; las pizzas individuales no.
 TIPOS_PRODUCTO = {
-    "COMBO": "Combo (pizza + soda)",
-    "PIZZA": "Pizza individual",
+    "COMBO": ("Combo", "Una pizza con soda incluida"),
+    "DUO": ("Combo de 2 pizzas", "Dos pizzas individuales diferentes con soda"),
+    "PIZZA": ("Pizza individual", "Solo la pizza, sin soda"),
 }
+TIPOS_COMBO = ("COMBO", "DUO")
 MIN_COMBOS = 5
 
 # Formas de entrega que admite cada pizza (valor guardado -> texto visible).
@@ -129,6 +132,21 @@ ENTREGAS_PIZZA = {
 }
 
 
+def _cargar_productos(conn):
+    """
+    Devuelve todos los productos como diccionarios. A los combos de 2 pizzas
+    se les añade "componentes": las dos pizzas individuales que incluyen.
+    """
+    productos = [dict(row) for row in conn.execute("SELECT * FROM pizzas ORDER BY id")]
+    por_id = {p["id"]: p for p in productos}
+    for p in productos:
+        if p["tipo"] == "DUO":
+            p["componentes"] = [
+                por_id[i] for i in (p["pizza1_id"], p["pizza2_id"]) if i in por_id
+            ]
+    return productos
+
+
 def _pizza_fields_from_form():
     tipo = request.form.get("tipo", "COMBO")
     nombre = request.form.get("nombre", "").strip()
@@ -136,21 +154,45 @@ def _pizza_fields_from_form():
     refresco = request.form.get("refresco", "")
     precio = float(request.form.get("precio", "0"))
     entrega = request.form.get("entrega", "AMBOS")
+    pizza1_id = pizza2_id = None
 
     if tipo not in TIPOS_PRODUCTO:
-        raise ValueError("Seleccione si es un combo o una pizza individual.")
+        raise ValueError("Seleccione el tipo de producto (combo, combo de 2 pizzas o pizza).")
     if not nombre:
         raise ValueError("El nombre es obligatorio.")
-    if len(ingredientes) < MIN_INGREDIENTES or len(ingredientes) > MAX_INGREDIENTES:
-        raise ValueError(
-            f"Debe seleccionar entre {MIN_INGREDIENTES} y {MAX_INGREDIENTES} ingredientes "
-            "(el queso mozzarella ya viene incluido)."
-        )
-    if len(set(ingredientes)) != len(ingredientes) or not set(ingredientes).issubset(
-        INGREDIENTES_DISPONIBLES
-    ):
-        raise ValueError("Seleccione ingredientes válidos y sin duplicados.")
-    if tipo == "COMBO":
+
+    if tipo == "DUO":
+        # El combo de 2 pizzas se arma con dos pizzas individuales diferentes.
+        try:
+            pizza1_id = int(request.form.get("pizza1_id", ""))
+            pizza2_id = int(request.form.get("pizza2_id", ""))
+        except ValueError:
+            raise ValueError("Seleccione las dos pizzas del combo.")
+        if pizza1_id == pizza2_id:
+            raise ValueError("Las dos pizzas del combo deben ser diferentes.")
+        conn = database.get_local_conn()
+        try:
+            validas = conn.execute(
+                "SELECT COUNT(*) FROM pizzas WHERE tipo='PIZZA' AND id IN (?, ?)",
+                (pizza1_id, pizza2_id),
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        if validas != 2:
+            raise ValueError("Las pizzas del combo deben ser pizzas individuales del menú.")
+        ingredientes = []  # se toman de las dos pizzas que lo componen
+    else:
+        if len(ingredientes) < MIN_INGREDIENTES or len(ingredientes) > MAX_INGREDIENTES:
+            raise ValueError(
+                f"Debe seleccionar entre {MIN_INGREDIENTES} y {MAX_INGREDIENTES} ingredientes "
+                "(el queso mozzarella ya viene incluido)."
+            )
+        if len(set(ingredientes)) != len(ingredientes) or not set(ingredientes).issubset(
+            INGREDIENTES_DISPONIBLES
+        ):
+            raise ValueError("Seleccione ingredientes válidos y sin duplicados.")
+
+    if tipo in TIPOS_COMBO:
         if refresco not in SABORES_SODA:
             raise ValueError("Seleccione la soda que incluye el combo.")
     else:
@@ -160,20 +202,46 @@ def _pizza_fields_from_form():
     if entrega not in ENTREGAS_PIZZA:
         raise ValueError("Seleccione una forma de entrega válida.")
 
-    return tipo, nombre, ingredientes, refresco, precio, entrega
+    return {
+        "tipo": tipo, "nombre": nombre, "ingredientes": ",".join(ingredientes),
+        "refresco": refresco, "precio": precio, "entrega": entrega,
+        "pizza1_id": pizza1_id, "pizza2_id": pizza2_id,
+    }
 
 
 def _contar_combos(excluir_id=None):
     conn = database.get_local_conn()
     try:
         return conn.execute(
-            "SELECT COUNT(*) FROM pizzas WHERE tipo='COMBO' AND id IS NOT ?", (excluir_id,)
+            "SELECT COUNT(*) FROM pizzas WHERE tipo IN ('COMBO', 'DUO') AND id IS NOT ?",
+            (excluir_id,),
         ).fetchone()[0]
     finally:
         conn.close()
 
 
+def _combos_que_usan(pizza_id):
+    """Nombres de los combos de 2 pizzas que incluyen esta pizza individual."""
+    conn = database.get_local_conn()
+    try:
+        return [
+            row["nombre"] for row in conn.execute(
+                "SELECT nombre FROM pizzas WHERE tipo='DUO' AND ? IN (pizza1_id, pizza2_id)",
+                (pizza_id,),
+            )
+        ]
+    finally:
+        conn.close()
+
+
 def _fabrica_form_context(pizza, tipo_actual, entrega_actual, ingredientes_actuales):
+    conn = database.get_local_conn()
+    try:
+        individuales = conn.execute(
+            "SELECT id, nombre, precio FROM pizzas WHERE tipo='PIZZA' ORDER BY nombre"
+        ).fetchall()
+    finally:
+        conn.close()
     return dict(
         pizza=pizza,
         ingredientes_disponibles=INGREDIENTES_DISPONIBLES,
@@ -181,6 +249,7 @@ def _fabrica_form_context(pizza, tipo_actual, entrega_actual, ingredientes_actua
         tipos_producto=TIPOS_PRODUCTO, tipo_actual=tipo_actual,
         entregas_pizza=ENTREGAS_PIZZA, entrega_actual=entrega_actual,
         ingredientes_actuales=ingredientes_actuales,
+        pizzas_individuales=individuales,
         min_ing=MIN_INGREDIENTES, max_ing=MAX_INGREDIENTES,
     )
 
@@ -215,27 +284,28 @@ def _notify_json_recipients(recipients, subject, json_data, ruta_json):
 def index():
     try:
         conn = database.get_local_conn()
-        pizzas = conn.execute("SELECT * FROM pizzas ORDER BY id").fetchall()
+        productos = _cargar_productos(conn)
         conn.close()
     except sqlite3.Error as e:
         flash(f"Error al cargar el menú: {e}", "danger")
-        pizzas = []
+        productos = []
     return render_template(
         "index.html",
-        combos=[p for p in pizzas if p["tipo"] == "COMBO"],
-        individuales=[p for p in pizzas if p["tipo"] == "PIZZA"],
+        combos=[p for p in productos if p["tipo"] == "COMBO"],
+        duos=[p for p in productos if p["tipo"] == "DUO"],
+        individuales=[p for p in productos if p["tipo"] == "PIZZA"],
         entregas_pizza=ENTREGAS_PIZZA,
     )
 
 
 # ----------------------------------------------------------------------
-# FABRICA — CRUD de pizzas (ingredientes, refrescos)
+# FABRICA — CRUD de combos y pizzas (ingredientes, refrescos)
 # ----------------------------------------------------------------------
 @app.route("/fabrica")
 def fabrica():
     try:
         conn = database.get_local_conn()
-        pizzas = conn.execute("SELECT * FROM pizzas ORDER BY id").fetchall()
+        pizzas = _cargar_productos(conn)
         conn.close()
     except sqlite3.Error as e:
         flash(f"Error al consultar pizzas: {e}", "danger")
@@ -243,7 +313,7 @@ def fabrica():
     return render_template(
         "fabrica.html", pizzas=pizzas, entregas_pizza=ENTREGAS_PIZZA,
         tipos_producto=TIPOS_PRODUCTO,
-        total_combos=sum(1 for p in pizzas if p["tipo"] == "COMBO"), min_combos=MIN_COMBOS,
+        total_combos=sum(1 for p in pizzas if p["tipo"] in TIPOS_COMBO), min_combos=MIN_COMBOS,
     )
 
 
@@ -251,30 +321,41 @@ def fabrica():
 def fabrica_nueva():
     if request.method == "POST":
         try:
-            tipo, nombre, ingredientes, refresco, precio, entrega = _pizza_fields_from_form()
+            datos = _pizza_fields_from_form()
 
             ok, last_id, error = database.replicate_write(
-                "INSERT INTO pizzas (nombre, ingredientes, refresco, precio, entrega, tipo) "
-                "VALUES (?,?,?,?,?,?)",
-                (nombre, ",".join(ingredientes), refresco, precio, entrega, tipo),
+                "INSERT INTO pizzas (nombre, ingredientes, refresco, precio, entrega, tipo, "
+                "pizza1_id, pizza2_id) VALUES (?,?,?,?,?,?,?,?)",
+                (datos["nombre"], datos["ingredientes"], datos["refresco"], datos["precio"],
+                 datos["entrega"], datos["tipo"], datos["pizza1_id"], datos["pizza2_id"]),
             )
             if not ok:
                 raise RuntimeError(error)
             if error:
                 flash(error, "warning")
 
-            producto = "Combo" if tipo == "COMBO" else "Pizza"
-            flash(f"{producto} '{nombre}' creado correctamente (guardado y replicado).", "success")
+            producto = TIPOS_PRODUCTO[datos["tipo"]][0]
+            flash(
+                f"{producto} '{datos['nombre']}' creado correctamente (guardado y replicado).",
+                "success",
+            )
             return redirect(url_for("fabrica"))
 
-        except (ValueError, RuntimeError) as e:
+        except (ValueError, RuntimeError, sqlite3.Error) as e:
             flash(f"Error: {e}", "danger")
 
     tipo_actual = request.form.get("tipo") or request.args.get("tipo", "COMBO")
+    previo = None
+    if request.method == "POST":
+        previo = {
+            "refresco": request.form.get("refresco"),
+            "pizza1_id": request.form.get("pizza1_id", type=int),
+            "pizza2_id": request.form.get("pizza2_id", type=int),
+        }
     return render_template(
         "fabrica_form.html",
         **_fabrica_form_context(
-            {"refresco": request.form.get("refresco")} if request.method == "POST" else None,
+            previo,
             tipo_actual if tipo_actual in TIPOS_PRODUCTO else "COMBO",
             request.form.get("entrega", "AMBOS"),
             request.form.getlist("ingredientes"),
@@ -298,27 +379,36 @@ def fabrica_editar(pizza_id):
 
     if request.method == "POST":
         try:
-            tipo, nombre, ingredientes, refresco, precio, entrega = _pizza_fields_from_form()
+            datos = _pizza_fields_from_form()
             if (
-                pizza["tipo"] == "COMBO" and tipo != "COMBO"
+                pizza["tipo"] in TIPOS_COMBO and datos["tipo"] not in TIPOS_COMBO
                 and _contar_combos(excluir_id=pizza_id) < MIN_COMBOS
             ):
                 raise ValueError(
                     f"El catálogo debe conservar al menos {MIN_COMBOS} combos; "
                     "no se puede convertir este combo en pizza individual."
                 )
+            if pizza["tipo"] == "PIZZA" and datos["tipo"] != "PIZZA":
+                usados = _combos_que_usan(pizza_id)
+                if usados:
+                    raise ValueError(
+                        "Esta pizza forma parte de: " + ", ".join(usados)
+                        + ". Debe seguir siendo una pizza individual."
+                    )
 
             ok, _, error = database.replicate_write(
                 "UPDATE pizzas SET nombre=?, ingredientes=?, refresco=?, precio=?, entrega=?, "
-                "tipo=? WHERE id=?",
-                (nombre, ",".join(ingredientes), refresco, precio, entrega, tipo, pizza_id),
+                "tipo=?, pizza1_id=?, pizza2_id=? WHERE id=?",
+                (datos["nombre"], datos["ingredientes"], datos["refresco"], datos["precio"],
+                 datos["entrega"], datos["tipo"], datos["pizza1_id"], datos["pizza2_id"],
+                 pizza_id),
             )
             if not ok:
                 raise RuntimeError(error)
             if error:
                 flash(error, "warning")
 
-            flash(f"'{nombre}' actualizado correctamente.", "success")
+            flash(f"'{datos['nombre']}' actualizado correctamente.", "success")
             return redirect(url_for("fabrica"))
 
         except (ValueError, RuntimeError, sqlite3.Error) as e:
@@ -338,12 +428,19 @@ def fabrica_eliminar(pizza_id):
         pizza = conn.execute("SELECT tipo FROM pizzas WHERE id=?", (pizza_id,)).fetchone()
         conn.close()
         combos_restantes = _contar_combos(excluir_id=pizza_id)
+        usados = _combos_que_usan(pizza_id)
     except sqlite3.Error as e:
         flash(f"Error al comprobar el catálogo: {e}", "danger")
         return redirect(url_for("fabrica"))
 
-    if pizza is not None and pizza["tipo"] == "COMBO" and combos_restantes < MIN_COMBOS:
+    if pizza is not None and pizza["tipo"] in TIPOS_COMBO and combos_restantes < MIN_COMBOS:
         flash("El catálogo debe conservar al menos cinco combos.", "warning")
+        return redirect(url_for("fabrica"))
+    if usados:
+        flash(
+            "No se puede eliminar: esta pizza forma parte de " + ", ".join(usados) + ".",
+            "warning",
+        )
         return redirect(url_for("fabrica"))
 
     ok, _, error = database.replicate_write("DELETE FROM pizzas WHERE id=?", (pizza_id,))
@@ -425,7 +522,7 @@ def pedidos():
             conn.close()
             if pizza is None:
                 raise ValueError("La pizza seleccionada no existe.")
-            if pizza["tipo"] == "COMBO":
+            if pizza["tipo"] in TIPOS_COMBO:
                 sodas_cantidad, sodas_tamano, sodas_detalle = _sodas_from_form()
             else:
                 # Solo los combos incluyen sodas.

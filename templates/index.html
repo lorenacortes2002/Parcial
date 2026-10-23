@@ -31,8 +31,16 @@
     <div class="pizza-art pizza-art--{{ art }}" aria-hidden="true"></div>
     <div class="card-body">
       <h3>{{ p.nombre }}</h3>
-      <p class="muted">Queso mozzarella, {{ p.ingredientes.replace(',', ', ') }}</p>
-      {% if p.tipo == 'COMBO' %}
+      {% if p.tipo == 'DUO' %}
+        <ul class="duo-parts">
+          {% for parte in p.componentes %}
+            <li><strong>🍕 {{ parte.nombre }}:</strong> queso mozzarella, {{ parte.ingredientes.replace(',', ', ') }}</li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="muted">Queso mozzarella, {{ p.ingredientes.replace(',', ', ') }}</p>
+      {% endif %}
+      {% if p.tipo != 'PIZZA' %}
         <p class="drink">🥤 Incluye {{ p.refresco }}</p>
       {% else %}
         <p class="drink">🍕 Pizza individual</p>
@@ -62,6 +70,16 @@
     </div>
     {% endfor %}
   </div>
+
+  {% if duos %}
+  <h3 class="menu-subtitle">Combos de 2 pizzas</h3>
+  <p class="muted">Dos pizzas diferentes y una soda, ideal para compartir.</p>
+  <div class="grid">
+    {% for p in duos %}
+      {{ menu_card(p, (loop.index0 + 1) % 5) }}
+    {% endfor %}
+  </div>
+  {% endif %}
 </section>
 
 <section class="menu-section" id="pizzas" aria-labelledby="pizzas-title">

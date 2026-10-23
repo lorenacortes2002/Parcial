@@ -52,6 +52,11 @@ class ProjectRequirementsTests(unittest.TestCase):
         finally:
             conn.close()
 
+    def _delete_duo_combos(self):
+        """Deja solo los cinco combos de una pizza para probar el mínimo."""
+        for (duo_id,) in self._rows(self.local_path, "SELECT id FROM pizzas WHERE tipo='DUO'"):
+            self.client.post(f"/fabrica/eliminar/{duo_id}")
+
     def test_startup_has_five_catalog_items_in_both_databases(self):
         for path in (self.local_path, self.replica_path):
             rows = self._rows(path, "SELECT id, nombre FROM pizzas ORDER BY id")
@@ -132,6 +137,7 @@ class ProjectRequirementsTests(unittest.TestCase):
                 self._rows(path, "SELECT id FROM pizzas WHERE id=?", (pizza_id,)), []
             )
 
+        self._delete_duo_combos()
         protected = self.client.post("/fabrica/eliminar/1", follow_redirects=True)
         self.assertIn(b"al menos cinco combos", protected.data)
 
@@ -511,11 +517,92 @@ class ProjectRequirementsTests(unittest.TestCase):
             self.assertEqual(
                 self._rows(path, "SELECT id FROM pizzas WHERE id=?", (temporal_id,)), []
             )
+        self._delete_duo_combos()
         to_pizza = self.client.post(
             "/fabrica/editar/1",
             data={**base, "tipo": "PIZZA", "nombre": "Pepperoni Clásica"},
         )
         self.assertIn(b"al menos 5 combos", to_pizza.data)
+
+    def test_combo_pizzas_are_also_individual_and_duo_combos(self):
+        catalog = self._rows(self.replica_path, "SELECT nombre, tipo FROM pizzas")
+        for nombre in ("Pepperoni Clásica", "Hawaiana", "Vegetariana",
+                       "Suprema Chinos", "Cuatro Quesos"):
+            self.assertIn((nombre, "COMBO"), catalog)
+            self.assertIn((nombre, "PIZZA"), catalog)
+
+        duos = self._rows(
+            self.local_path,
+            "SELECT d.nombre, p1.nombre, p2.nombre, d.refresco FROM pizzas d "
+            "JOIN pizzas p1 ON p1.id = d.pizza1_id JOIN pizzas p2 ON p2.id = d.pizza2_id "
+            "WHERE d.tipo='DUO' ORDER BY d.id",
+        )
+        self.assertEqual(
+            [(d[1], d[2]) for d in duos],
+            [("Margarita", "Pepperoni"), ("Pepperoni", "Jamón y Champiñones"),
+             ("Jamón y Champiñones", "Margarita")],
+        )
+        self.assertTrue(all(d[3] for d in duos))
+        menu = self.client.get("/").get_data(as_text=True)
+        self.assertIn("Combos de 2 pizzas", menu)
+        self.assertIn("Dúo Margarita + Pepperoni", menu)
+
+        ids = dict(self._rows(
+            self.local_path, "SELECT nombre, id FROM pizzas WHERE tipo='PIZZA'"
+        ))
+        base = {"tipo": "DUO", "refresco": "Agua", "precio": "12.00"}
+        same = self.client.post(
+            "/fabrica/nueva",
+            data={**base, "nombre": "Dúo igual",
+                  "pizza1_id": ids["Hawaiana"], "pizza2_id": ids["Hawaiana"]},
+        )
+        self.assertIn(b"deben ser diferentes", same.data)
+        combo_id = self._rows(
+            self.local_path, "SELECT id FROM pizzas WHERE tipo='COMBO' LIMIT 1"
+        )[0][0]
+        not_individual = self.client.post(
+            "/fabrica/nueva",
+            data={**base, "nombre": "Dúo combo",
+                  "pizza1_id": ids["Hawaiana"], "pizza2_id": combo_id},
+        )
+        self.assertIn(b"deben ser pizzas individuales", not_individual.data)
+
+        self.client.post(
+            "/fabrica/nueva",
+            data={**base, "nombre": "Dúo Hawaiana + Vegetariana",
+                  "pizza1_id": ids["Hawaiana"], "pizza2_id": ids["Vegetariana"]},
+        )
+        new_duo = self._rows(
+            self.replica_path,
+            "SELECT id, pizza1_id, pizza2_id, ingredientes FROM pizzas "
+            "WHERE nombre='Dúo Hawaiana + Vegetariana'",
+        )[0]
+        self.assertEqual(new_duo[1:], (ids["Hawaiana"], ids["Vegetariana"], ""))
+
+        # Una pizza que forma parte de un dúo no se puede borrar.
+        blocked = self.client.post(
+            f"/fabrica/eliminar/{ids['Vegetariana']}", follow_redirects=True
+        )
+        self.assertIn("forma parte de Dúo Hawaiana + Vegetariana".encode(), blocked.data)
+
+        # El dúo es un combo: al pedirlo se guardan las sodas.
+        self.client.post(
+            "/pedidos",
+            data={
+                "cliente": "Cliente",
+                "correo_cliente": "cliente@example.com",
+                "pizza_id": str(new_duo[0]),
+                "cantidad": "1",
+                "retiro_o_flete": "RETIRO EN SITIO",
+                "refresco_cantidad": "2",
+                "refresco_tamano": "LATA 12 OZ",
+                "refrescos": ["Agua"],
+            },
+        )
+        self.assertEqual(
+            self._rows(self.local_path, "SELECT refresco, total FROM pedidos"),
+            [("2× Agua (Lata 12 oz)", 12.0)],
+        )
 
     def test_unknown_yappy_code_is_handled(self):
         self.assertEqual(self.client.get("/yappy/pagar/CC-NOPE00").status_code, 404)
