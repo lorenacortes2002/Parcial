@@ -8,3 +8,4 @@ __pycache__/
 .env.*
 !.env.example
 correos_enviados.log
+utils.py.antes-factura-*

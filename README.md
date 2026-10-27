@@ -60,7 +60,8 @@ Abrir **http://127.0.0.1:5000**
      el cajero anota el número de transacción recibido y confirma.
   Al confirmar se genera el JSON del pago, se guarda en la base de datos (`pagos.json_pago`) y se
   **envían por correo** al cliente y a la empresa los JSON del pedido y del pago
-  tal como están guardados en la base de datos, y el pedido pasa a `PAGADO` (o `PAGADO - DESPACHAR (FLETE)` si eligió flete).
+  tal como están guardados en la base de datos, junto con un comprobante PDF académico sin validez
+  fiscal. El pedido pasa a `PAGADO` (o `PAGADO - DESPACHAR (FLETE)` si eligió flete).
   Si no hay servidor SMTP configurado, el envío queda registrado en `correos_enviados.log` y el sitio avisa. Un pedido pagado no se puede cobrar dos veces.
   El número y el nombre de directorio se configuran con `YAPPY_TELEFONO` y `YAPPY_DIRECTORIO`.
   Para escanear el QR con un celular, este debe estar en la misma red Wi-Fi que la computadora.
