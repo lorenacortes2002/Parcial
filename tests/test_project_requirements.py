@@ -20,6 +20,13 @@ class ProjectRequirementsTests(unittest.TestCase):
         self.local_path = root / "local.sqlite3"
         self.replica_path = root / "replica.sqlite3"
 
+        # Las pruebas usan la réplica en archivo local, aunque el .env del equipo
+        # configure una réplica remota (REPLICA_URL). Cada prueba de réplica
+        # remota define REPLICA_URL por su cuenta con mock.patch.dict.
+        entorno = mock.patch.dict("os.environ", {"REPLICA_URL": ""})
+        entorno.start()
+        self.addCleanup(entorno.stop)
+
         for name, value in (
             ("DB_LOCAL_PATH", str(self.local_path)),
             ("DB_REPLICA_PATH", str(self.replica_path)),
