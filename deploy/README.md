@@ -22,20 +22,12 @@ sudo systemctl restart vsftpd
 Login con el usuario del sistema (angel) y su contraseña.
 
 ## Port Knocking (knockd) para SSH y FTP
+Un solo comando (detecta la interfaz host-only, activa knockd y oculta 22/21):
 ```bash
-sudo apt install -y knockd
-sudo cp deploy/knockd.conf /etc/knockd.conf
-sudo sed -i 's/START_KNOCKD=0/START_KNOCKD=1/' /etc/default/knockd
-sudo systemctl enable --now knockd
-# Bloquear 22 y 21 por defecto (quedan ocultos hasta el "toque"):
-sudo iptables -D INPUT -s 192.168.56.0/24 -p tcp --dport 22 -j ACCEPT 2>/dev/null || true
-sudo iptables -A INPUT -p tcp --dport 22 -j DROP
-sudo iptables -A INPUT -p tcp --dport 21 -j DROP
+cd ~/Desktop/chinos_cafe_pizza && git pull
+sudo bash deploy/setup_knocking.sh
 ```
-Desde el cliente (PC u otra VM), para abrir SSH:
-```bash
-knock 192.168.56.50 7000 8000 9000 && ssh angel@192.168.56.50
-```
+Desde el cliente (PC u otra VM), para abrir SSH: `knock 192.168.56.50 7000 8000 9000 && ssh angel@192.168.56.50`.
 Para FTP: `knock 192.168.56.50 1111 2222 3333`.
 
 > Las reglas de iptables no sobreviven al reinicio salvo que se guarden
