@@ -40,3 +40,14 @@ Para FTP: `knock 192.168.56.50 1111 2222 3333`.
 
 > Las reglas de iptables no sobreviven al reinicio salvo que se guarden
 > (`sudo apt install iptables-persistent`). Para la sustentación basta dejarlas puestas.
+
+## App como servicio (para que no se caiga)
+```bash
+cd ~/Desktop/chinos_cafe_pizza && git pull
+source venv/bin/activate && pip install -r requirements.txt
+sudo cp deploy/chinos_cafe.service /etc/systemd/system/chinos_cafe.service
+sudo fuser -k 5000/tcp 2>/dev/null || true
+sudo systemctl daemon-reload
+sudo systemctl enable --now chinos_cafe
+systemctl status chinos_cafe --no-pager | head -6
+```

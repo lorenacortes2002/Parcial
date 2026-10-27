@@ -1,0 +1,14 @@
+[Unit]
+Description=CHINOS CAFE - app Flask (chinos_cafe_pizza)
+After=network.target
+
+[Service]
+User=angel
+WorkingDirectory=/home/angel/Desktop/chinos_cafe_pizza
+ExecStartPre=/home/angel/Desktop/chinos_cafe_pizza/venv/bin/python -c "import database; database.init_db()"
+ExecStart=/home/angel/Desktop/chinos_cafe_pizza/venv/bin/gunicorn --workers 2 --bind 127.0.0.1:5000 app:app
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
