@@ -1,0 +1,21 @@
+# Parte III — Mitigación de fuerza bruta con fail2ban.
+# Copiar a /etc/fail2ban/jail.local y reiniciar fail2ban. Banea IPs tras varios intentos fallidos.
+[DEFAULT]
+bantime  = 10m
+findtime = 1m
+maxretry = 5
+backend  = systemd
+
+[sshd]
+enabled = true
+port    = 22
+
+[vsftpd]
+enabled = true
+port    = 21
+logpath = %(vsftpd_log)s
+
+[nginx-limit-req]
+enabled  = true
+port     = 8080,8443
+logpath  = /var/log/nginx/error.log
