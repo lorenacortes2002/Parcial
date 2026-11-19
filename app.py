@@ -1162,4 +1162,13 @@ def api_replica_completa():
 if __name__ == "__main__":
     database.init_db()
     # host="0.0.0.0" permite exponerlo en la red LAN / detrás de NGINX
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    # HTTPS local: si existen los certificados en certs/, se sirve con TLS
+    # (certificado autofirmado). Si no existen, se usa HTTP normal.
+    _cert = os.path.join(os.path.dirname(os.path.abspath(__file__)), "certs", "cert.pem")
+    _key = os.path.join(os.path.dirname(os.path.abspath(__file__)), "certs", "key.pem")
+    if os.path.exists(_cert) and os.path.exists(_key):
+        print("[HTTPS] Servidor con TLS en https://127.0.0.1:5000 (certificado autofirmado)")
+        app.run(host="0.0.0.0", port=5000, debug=True, ssl_context=(_cert, _key))
+    else:
+        print("[HTTP] Servidor sin cifrado en http://127.0.0.1:5000")
+        app.run(host="0.0.0.0", port=5000, debug=True)

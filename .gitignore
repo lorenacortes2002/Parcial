@@ -9,3 +9,7 @@ __pycache__/
 !.env.example
 correos_enviados.log
 utils.py.antes-factura-*
+
+# Certificados TLS locales (no subir la llave privada)
+certs/
+*.pem

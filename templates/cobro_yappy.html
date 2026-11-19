@@ -69,23 +69,9 @@
 {% endblock %}
 {% block scripts %}
 {% if cobro.estado != 'PAGADO' %}
-<script>
-  (() => {
-    const statusUrl = "{{ url_for('cobro_yappy_estado', codigo=cobro.codigo) }}";
-    const timer = setInterval(async () => {
-      try {
-        const response = await fetch(statusUrl, { cache: "no-store" });
-        if (!response.ok) return;
-        const data = await response.json();
-        if (data.estado !== "PAGADO") return;
-        clearInterval(timer);
-        // Recarga para mostrar la confirmación con los avisos del servidor.
-        window.location.reload();
-      } catch (error) {
-        // Sin conexión momentánea: se reintenta en el siguiente ciclo.
-      }
-    }, 2500);
-  })();
-</script>
+<div id="cobro-estado"
+     data-status-url="{{ url_for('cobro_yappy_estado', codigo=cobro.codigo) }}"
+     hidden></div>
+<script src="{{ url_for('static', filename='cobro-estado.js') }}" defer></script>
 {% endif %}
 {% endblock %}
