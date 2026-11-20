@@ -22,6 +22,13 @@
       <dl class="payment-data">
         <div><dt>Referencia del pago</dt><dd><code>{{ cobro.codigo }}</code></dd></div>
       </dl>
+      {% if qr %}
+      <section class="payment-card" aria-labelledby="qr-title">
+        <h2 id="qr-title">Escanea el código QR</h2>
+        <div class="qr-box">{{ qr|safe }}</div>
+        <a class="small-link" href="{{ url_pago }}" target="_blank" rel="noopener">Abrir el enlace de pago en otra pestaña</a>
+      </section>
+      {% endif %}
       <form method="POST">
         <button type="submit" class="btn btn-block">Pagar ${{ "%.2f"|format(cobro.monto) }}</button>
       </form>

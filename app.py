@@ -1663,8 +1663,10 @@ def yappy_pagar(codigo):
         except (ValueError, RuntimeError, sqlite3.Error) as e:
             flash(f"Error al procesar el pago: {e}", "danger")
 
+    url_pago = _url_publica("yappy_pagar", codigo=cobro["codigo"])
     return render_template(
         "yappy_pagar.html", cobro=cobro, pedido=pedido,
+        qr=qr_svg(url_pago), url_pago=url_pago,
         yappy_directorio=YAPPY_DIRECTORIO,
     )
 
