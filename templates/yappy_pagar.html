@@ -9,21 +9,18 @@
       <span class="payment-success__icon" aria-hidden="true">✓</span>
       <div>
         <h2>¡Pago realizado!</h2>
-        <p>Pagaste <strong>${{ "%.2f"|format(cobro.monto) }}</strong> a CHINOS CAFÉ por el pedido #{{ pedido.id }}.</p>
-        <p>Código <code>{{ cobro.codigo }}</code> · Transacción <strong>{{ cobro.referencia }}</strong> · {{ cobro.fecha_pago }}</p>
-        <p class="muted">Te enviamos la confirmación a {{ pedido.correo_cliente }}.</p>
+        <p>Pagaste <strong>${{ "%.2f"|format(cobro.monto) }}</strong> a CHINOS CAFÉ.</p>
+        <p class="muted">La confirmación se enviará al correo proporcionado al hacer el pedido.</p>
       </div>
     </div>
   {% else %}
     <div class="checkout-card">
       <p class="eyebrow">Simulador de pago Yappy</p>
       <h1>Pagar a CHINOS CAFÉ</h1>
-      <p class="muted">{{ yappy_directorio }} · Pedido #{{ pedido.id }}</p>
+      <p class="muted">{{ yappy_directorio }}</p>
       <p class="checkout-amount">${{ "%.2f"|format(cobro.monto) }}</p>
       <dl class="payment-data">
-        <div><dt>Cliente</dt><dd>{{ pedido.cliente }}</dd></div>
-        <div><dt>Detalle</dt><dd>{{ pedido.pizza_nombre }}</dd></div>
-        <div><dt>Código</dt><dd><code>{{ cobro.codigo }}</code></dd></div>
+        <div><dt>Referencia del pago</dt><dd><code>{{ cobro.codigo }}</code></dd></div>
       </dl>
       <form method="POST">
         <button type="submit" class="btn btn-block">Pagar ${{ "%.2f"|format(cobro.monto) }}</button>

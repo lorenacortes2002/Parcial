@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Seguridad de la cuenta · CHINOS CAFÉ{% endblock %}
+{% block content %}
+<div class="checkout">
+  <section class="checkout-card">
+    <p class="eyebrow">Seguridad</p>
+    <h1>Cambiar contraseña</h1>
+    <p class="muted">Usa una contraseña nueva de al menos 12 caracteres.</p>
+    <form method="POST" class="form">
+      <label for="actual">Contraseña actual</label>
+      <input id="actual" name="actual" type="password"
+        autocomplete="current-password" required>
+      <label for="nueva">Contraseña nueva</label>
+      <input id="nueva" name="nueva" type="password"
+        autocomplete="new-password" minlength="12" required>
+      <label for="confirmacion">Repite la contraseña nueva</label>
+      <input id="confirmacion" name="confirmacion" type="password"
+        autocomplete="new-password" minlength="12" required>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-block">Actualizar contraseña</button>
+      </div>
+    </form>
+  </section>
+</div>
+{% endblock %}

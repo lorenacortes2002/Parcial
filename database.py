@@ -60,6 +60,15 @@ def token_replica_valido(recibido):
     return bool(esperado) and hmac.compare_digest(esperado, recibido or "")
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS usuarios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT NOT NULL,
+    correo TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    password_hash TEXT NOT NULL,
+    rol TEXT NOT NULL DEFAULT 'cliente' CHECK (rol IN ('cliente', 'admin')),
+    fecha_creacion TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS pizzas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nombre TEXT NOT NULL,
@@ -76,6 +85,7 @@ CREATE TABLE IF NOT EXISTS pedidos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     cliente TEXT NOT NULL,
     correo_cliente TEXT NOT NULL,
+    usuario_id INTEGER,
     pizza_id INTEGER NOT NULL,
     refresco TEXT,                              -- descripción, p. ej. "2× Coca-Cola, 1× Sprite (1 litro)"
     refresco_cantidad INTEGER NOT NULL DEFAULT 1,
@@ -140,6 +150,8 @@ CREATE TABLE IF NOT EXISTS cobros_yappy (
 def _migrate(conn):
     """Actualiza bases creadas con versiones anteriores del esquema."""
     columnas = {row["name"] for row in conn.execute("PRAGMA table_info(pedidos)")}
+    if "usuario_id" not in columnas:
+        conn.execute("ALTER TABLE pedidos ADD COLUMN usuario_id INTEGER")
     if "direccion" not in columnas:
         conn.execute("ALTER TABLE pedidos ADD COLUMN direccion TEXT")
     if "refresco_cantidad" not in columnas:

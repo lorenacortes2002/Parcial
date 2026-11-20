@@ -39,7 +39,22 @@ class ProjectRequirementsTests(unittest.TestCase):
         self.mail = mock.patch.object(webapp, "enviar_correo", return_value=(True, None))
         self.mail_mock = self.mail.start()
         self.addCleanup(self.mail.stop)
+        previous_admin_email = webapp.app.config["ADMIN_EMAIL"]
+        previous_password = webapp.app.config["ADMIN_PASSWORD"]
+        webapp.app.config["ADMIN_EMAIL"] = "admin@example.test"
+        webapp.app.config["ADMIN_PASSWORD"] = "test-staff-password"
+        self.addCleanup(webapp.app.config.__setitem__, "ADMIN_EMAIL", previous_admin_email)
+        self.addCleanup(webapp.app.config.__setitem__, "ADMIN_PASSWORD", previous_password)
         self.client = webapp.app.test_client()
+        login = self.client.post(
+            "/cuenta/login",
+            data={
+                "correo": "admin@example.test",
+                "password": "test-staff-password",
+                "next": "/admin",
+            },
+        )
+        self.assertEqual(login.status_code, 302)
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -513,8 +528,9 @@ class ProjectRequirementsTests(unittest.TestCase):
         menu = self.client.get("/").get_data(as_text=True)
         self.assertIn("Combos", menu)
         self.assertIn("Pizzas individuales", menu)
-        self.assertLess(menu.index("Hawaiana"), menu.index("Pizzas individuales"))
-        self.assertGreater(menu.index("<h3>Solo Pepperoni</h3>"), menu.index("Pizzas individuales"))
+        pizzas_section = menu.index('<section class="menu-section" id="pizzas"')
+        self.assertLess(menu.index("Hawaiana"), pizzas_section)
+        self.assertGreater(menu.index("<h3>Solo Pepperoni</h3>"), pizzas_section)
 
         # Las pizzas individuales también pueden llevar sodas (se cobran todas).
         self.client.post(
@@ -959,9 +975,232 @@ class ProjectRequirementsTests(unittest.TestCase):
         )
 
     def test_all_application_pages_render(self):
-        for path in ("/", "/fabrica", "/fabrica/nueva", "/pedidos", "/pagos"):
+        for path in (
+            "/", "/admin", "/admin/clientes", "/fabrica", "/fabrica/nueva",
+            "/pedidos", "/pagos", "/cuenta/seguridad",
+        ):
             with self.subTest(path=path):
                 self.assertEqual(self.client.get(path).status_code, 200)
+        guest = webapp.app.test_client()
+        self.assertEqual(guest.get("/").status_code, 200)
+        client_login = guest.get("/cuenta/login")
+        self.assertEqual(client_login.status_code, 200)
+        self.assertIn(b"Acceso cliente", client_login.data)
+        self.assertNotIn(b".env", client_login.data)
+        self.assertEqual(guest.get("/cuenta/registro").status_code, 200)
+        homepage = guest.get("/")
+        self.assertIn(b"Acceso cliente", homepage.data)
+        self.assertNotIn(b"Acceso administrador", homepage.data)
+        self.assertIn(b"Administraci\xc3\xb3n", self.client.get("/").data)
+
+        admin_login = guest.get("/admin/login", follow_redirects=True)
+        self.assertEqual(admin_login.status_code, 200)
+        self.assertIn(b"Acceso de administrador", admin_login.data)
+        self.assertNotIn(b"Reg\xc3\xadstrate", admin_login.data)
+
+    def test_staff_pages_require_login_and_customer_views_hide_private_data(self):
+        self.client.post("/pedidos", data={
+            "cliente": "Nombre privado",
+            "correo_cliente": "privado@example.com",
+            "pizza_id": "1",
+            "cantidad": "1",
+            "retiro_o_flete": "RETIRO EN SITIO",
+            "refresco_cantidad": "0",
+        })
+        charge = self.client.post("/pagos", data={"pedido_id": "1"})
+        codigo = charge.headers["Location"].rsplit("/", 1)[-1]
+
+        guest = webapp.app.test_client()
+        for path in (
+            "/fabrica",
+            "/fabrica/nueva",
+            "/pagos",
+            f"/pagos/yappy/{codigo}",
+            f"/pagos/yappy/{codigo}/estado",
+        ):
+            with self.subTest(path=path):
+                response = guest.get(path)
+                self.assertEqual(response.status_code, 302)
+                self.assertIn("/cuenta/login", response.headers["Location"])
+        mutation = guest.post("/fabrica/eliminar/1")
+        self.assertEqual(mutation.status_code, 302)
+        admin_entry = guest.get("/admin/login")
+        self.assertEqual(admin_entry.status_code, 302)
+        self.assertEqual(admin_entry.headers["Location"], "/admin")
+
+        order_page = guest.get("/pedidos")
+        self.assertEqual(order_page.status_code, 302)
+        self.assertIn("/cuenta/login", order_page.headers["Location"])
+
+        qr_page = guest.get(f"/yappy/pagar/{codigo}").get_data(as_text=True)
+        self.assertIn("$7.50", qr_page)
+        self.assertNotIn("Nombre privado", qr_page)
+        self.assertNotIn("privado@example.com", qr_page)
+        self.assertNotIn("Pepperoni Clásica", qr_page)
+
+    def test_login_rejects_bad_password_and_routes_admin_by_role(self):
+        guest = webapp.app.test_client()
+        rejected = guest.post(
+            "/cuenta/login",
+            data={
+                "correo": "admin@example.test",
+                "password": "wrong",
+                "next": "/admin",
+            },
+        )
+        self.assertEqual(rejected.status_code, 200)
+        self.assertIn("Correo o contraseña incorrectos".encode(), rejected.data)
+
+        accepted = guest.post(
+            "/cuenta/login",
+            data={
+                "correo": "admin@example.test",
+                "password": "test-staff-password",
+                "next": "/pedidos?pizza_id=1",
+            },
+        )
+        self.assertEqual(accepted.status_code, 302)
+        self.assertEqual(accepted.headers["Location"], "/admin")
+
+        external = webapp.app.test_client().post(
+            "/cuenta/login",
+            data={
+                "correo": "admin@example.test",
+                "password": "test-staff-password",
+                "next": "https://example.com",
+            },
+        )
+        self.assertEqual(external.status_code, 302)
+        self.assertEqual(external.headers["Location"], "/admin")
+
+    def test_client_registration_hashes_password_and_orders_require_login(self):
+        guest = webapp.app.test_client()
+        locked = guest.post("/pedidos", data={
+            "pizza_id": "1", "cantidad": "1",
+        })
+        self.assertEqual(locked.status_code, 302)
+        self.assertEqual(
+            self._rows(self.local_path, "SELECT COUNT(*) FROM pedidos")[0][0], 0
+        )
+
+        registered = guest.post("/cuenta/registro", data={
+            "nombre": "Cliente nuevo",
+            "correo": "cliente@example.test",
+            "password": "una-clave-segura-123",
+            "confirmacion": "una-clave-segura-123",
+            "next": "/pedidos?pizza_id=1",
+        })
+        self.assertEqual(registered.status_code, 302)
+        self.assertEqual(registered.headers["Location"], "/pedidos?pizza_id=1")
+
+        user = self._rows(
+            self.local_path,
+            "SELECT id, password_hash, rol FROM usuarios WHERE correo=?",
+            ("cliente@example.test",),
+        )[0]
+        self.assertNotEqual(user[1], "una-clave-segura-123")
+        self.assertEqual(user[2], "cliente")
+
+        created = guest.post("/pedidos", data={
+            "pizza_id": "1",
+            "cantidad": "1",
+            "retiro_o_flete": "RETIRO EN SITIO",
+            "refresco_cantidad": "0",
+        })
+        self.assertEqual(created.status_code, 302)
+        order = self._rows(
+            self.local_path,
+            "SELECT usuario_id, cliente, correo_cliente FROM pedidos",
+        )[0]
+        self.assertEqual(
+            order, (user[0], "Cliente nuevo", "cliente@example.test")
+        )
+        self.assertIn("Mis pedidos", guest.get("/pedidos").get_data(as_text=True))
+
+    def test_client_accounts_cannot_open_admin_panel_or_see_other_orders(self):
+        other_customer = webapp.app.test_client()
+        other_customer.post("/cuenta/registro", data={
+            "nombre": "Otro cliente",
+            "correo": "otro@example.test",
+            "password": "clave-segura-de-otro-123",
+            "confirmacion": "clave-segura-de-otro-123",
+        })
+        other_customer.post("/pedidos", data={
+            "pizza_id": "1",
+            "cantidad": "1",
+            "retiro_o_flete": "RETIRO EN SITIO",
+            "refresco_cantidad": "0",
+        })
+
+        customer = webapp.app.test_client()
+        registered = customer.post("/cuenta/registro", data={
+            "nombre": "Ana Cliente",
+            "correo": "ana@example.test",
+            "password": "clave-segura-de-ana-123",
+            "confirmacion": "clave-segura-de-ana-123",
+            "next": "/admin",
+        })
+        self.assertEqual(registered.headers["Location"], "/pedidos")
+
+        response = customer.get("/admin")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/")
+        page = customer.get("/pedidos").get_data(as_text=True)
+        self.assertIn("Mis pedidos", page)
+        self.assertNotIn("Otro cliente", page)
+
+    def test_account_password_can_be_changed_and_used_for_login(self):
+        response = self.client.post("/cuenta/seguridad", data={
+            "actual": "test-staff-password",
+            "nueva": "nueva-clave-segura-123",
+            "confirmacion": "nueva-clave-segura-123",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/admin")
+
+        guest = webapp.app.test_client()
+        old_password = guest.post("/cuenta/login", data={
+            "correo": "admin@example.test",
+            "password": "test-staff-password",
+        })
+        self.assertEqual(old_password.status_code, 200)
+        new_password = guest.post("/cuenta/login", data={
+            "correo": "admin@example.test",
+            "password": "nueva-clave-segura-123",
+        })
+        self.assertEqual(new_password.status_code, 302)
+        self.assertEqual(new_password.headers["Location"], "/admin")
+
+    def test_admin_is_created_from_environment_config(self):
+        admin = self._rows(
+            self.local_path,
+            "SELECT correo, rol, password_hash FROM usuarios",
+        )
+        self.assertEqual(len(admin), 1)
+        self.assertEqual(admin[0][:2], ("admin@example.test", "admin"))
+        self.assertNotEqual(admin[0][2], "test-staff-password")
+
+    def test_admin_login_requires_both_configuration_values(self):
+        guest = webapp.app.test_client()
+        conn = database.get_local_conn()
+        try:
+            conn.execute("DELETE FROM usuarios WHERE rol='admin'")
+            conn.commit()
+        finally:
+            conn.close()
+        previous_email = webapp.app.config["ADMIN_EMAIL"]
+        previous_password = webapp.app.config["ADMIN_PASSWORD"]
+        webapp.app.config["ADMIN_EMAIL"] = ""
+        self.addCleanup(
+            webapp.app.config.__setitem__, "ADMIN_EMAIL", previous_email
+        )
+        webapp.app.config["ADMIN_PASSWORD"] = "test-staff-password"
+        self.addCleanup(
+            webapp.app.config.__setitem__, "ADMIN_PASSWORD", previous_password
+        )
+        response = guest.get("/cuenta/login")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Configura ADMIN_EMAIL y ADMIN_PASSWORD", response.data)
 
     def test_menu_order_link_preselects_the_requested_pizza(self):
         menu = self.client.get("/")
