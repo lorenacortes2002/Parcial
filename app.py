@@ -1188,6 +1188,56 @@ def pedidos():
     )
 
 
+@app.route("/pedidos/<int:pedido_id>/pagar", methods=["POST"])
+@requiere_usuario
+def pedido_pagar(pedido_id):
+    """
+    Permite que el cliente pague SU propio pedido (y el admin, cualquiera).
+    Genera (o reutiliza) el cobro Yappy del pedido y lleva a la página de pago.
+    """
+    try:
+        conn = database.get_local_conn()
+        try:
+            pedido = _obtener_pedido(conn, pedido_id)
+            if pedido is None:
+                raise ValueError("El pedido indicado no existe.")
+            es_admin = session.get("usuario_rol") == "admin"
+            if not es_admin and pedido["usuario_id"] != session.get("usuario_id"):
+                raise ValueError("Ese pedido no es tuyo.")
+            if pedido["estado"] in ESTADOS_PAGADOS or conn.execute(
+                "SELECT 1 FROM pagos WHERE pedido_id=?", (pedido_id,)
+            ).fetchone():
+                raise ValueError("Este pedido ya fue pagado.")
+            cobro = conn.execute(
+                "SELECT codigo FROM cobros_yappy "
+                "WHERE pedido_id=? AND estado='PENDIENTE'",
+                (pedido_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+
+        # Si ya tenía un cobro pendiente, se reutiliza el mismo código.
+        if cobro:
+            return redirect(url_for("yappy_pagar", codigo=cobro["codigo"]))
+
+        codigo = generar_codigo_cobro()
+        ok, _, error = database.replicate_write(
+            "INSERT INTO cobros_yappy (pedido_id, codigo, monto, estado, fecha) "
+            "VALUES (?,?,?,?,?)",
+            (pedido_id, codigo, pedido["total"], "PENDIENTE",
+             datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        )
+        if not ok:
+            raise RuntimeError(error)
+        if error:
+            flash(error, "warning")
+        return redirect(url_for("yappy_pagar", codigo=codigo))
+
+    except (ValueError, RuntimeError, TypeError, sqlite3.Error) as e:
+        flash(f"No se pudo iniciar el pago: {e}", "danger")
+        return redirect(url_for("pedidos"))
+
+
 # ----------------------------------------------------------------------
 # PAGOS — cobro con Yappy Comercial:
 #   1. Se elige el pedido y se genera un cobro con código único.

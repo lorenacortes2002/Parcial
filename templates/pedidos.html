@@ -268,7 +268,7 @@
 <div class="table-wrap">
 <table class="tabla">
   <thead>
-    <tr><th>#</th><th>Cliente</th><th>Productos</th><th>Sodas</th><th>Total</th><th>Entrega</th><th>Estado</th><th>Fecha</th></tr>
+    <tr><th>#</th><th>Cliente</th><th>Productos</th><th>Sodas</th><th>Total</th><th>Entrega</th><th>Estado</th><th>Fecha</th><th>Pago</th></tr>
   </thead>
   <tbody>
     {% for pe in pedidos %}
@@ -284,9 +284,18 @@
       </td>
       <td><span class="estado">{{ pe.estado }}</span></td>
       <td>{{ pe.fecha }}</td>
+      <td>
+        {% if 'PAGADO' in pe.estado %}
+          <span class="estado">✓ Pagado</span>
+        {% else %}
+          <form method="post" action="{{ url_for('pedido_pagar', pedido_id=pe.id) }}">
+            <button type="submit" class="btn">Pagar con Yappy</button>
+          </form>
+        {% endif %}
+      </td>
     </tr>
     {% else %}
-    <tr><td colspan="8">Todavía no hay pedidos registrados.</td></tr>
+    <tr><td colspan="9">Todavía no hay pedidos registrados.</td></tr>
     {% endfor %}
   </tbody>
 </table>
