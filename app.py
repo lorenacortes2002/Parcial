@@ -1143,7 +1143,12 @@ def pedidos():
             session.pop("carrito", None)
             session.pop("pedido_borrador", None)
             flash(f"Pedido #{pedido_id} confirmado y guardado en ambas bases.", "success")
-            return redirect(url_for("pedidos"))
+            # Se lleva directo al pago; el cliente decide pagar ahora o dejarlo pendiente.
+            try:
+                codigo = _obtener_o_crear_cobro({"id": pedido_id, "total": total})
+                return redirect(url_for("yappy_pagar", codigo=codigo))
+            except (RuntimeError, sqlite3.Error):
+                return redirect(url_for("pedidos"))
 
         except (ValueError, RuntimeError, TypeError, sqlite3.Error) as e:
             flash(f"Error al crear el pedido: {e}", "danger")
@@ -1188,54 +1193,196 @@ def pedidos():
     )
 
 
+ESTADO_CANCELADO = "CANCELADO"
+
+
+def _obtener_o_crear_cobro(pedido):
+    """Código de cobro PENDIENTE del pedido; lo crea si no existe. `pedido` con id y total."""
+    conn = database.get_local_conn()
+    try:
+        row = conn.execute(
+            "SELECT codigo FROM cobros_yappy WHERE pedido_id=? AND estado='PENDIENTE'",
+            (pedido["id"],),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row:
+        return row["codigo"]
+    codigo = generar_codigo_cobro()
+    ok, _, error = database.replicate_write(
+        "INSERT INTO cobros_yappy (pedido_id, codigo, monto, estado, fecha) "
+        "VALUES (?,?,?,?,?)",
+        (pedido["id"], codigo, pedido["total"], "PENDIENTE",
+         datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+    )
+    if not ok:
+        raise RuntimeError(error)
+    if error:
+        flash(error, "warning")
+    return codigo
+
+
+def _pedido_de_este_usuario(pedido):
+    """True si el pedido es del usuario en sesión o si es admin."""
+    return (
+        session.get("usuario_rol") == "admin"
+        or pedido["usuario_id"] == session.get("usuario_id")
+    )
+
+
+def _pedido_tiene_pago(conn, pedido_id):
+    return conn.execute(
+        "SELECT 1 FROM pagos WHERE pedido_id=?", (pedido_id,)
+    ).fetchone() is not None
+
+
 @app.route("/pedidos/<int:pedido_id>/pagar", methods=["POST"])
 @requiere_usuario
 def pedido_pagar(pedido_id):
-    """
-    Permite que el cliente pague SU propio pedido (y el admin, cualquiera).
-    Genera (o reutiliza) el cobro Yappy del pedido y lleva a la página de pago.
-    """
+    """El cliente paga SU propio pedido (y el admin, cualquiera)."""
     try:
         conn = database.get_local_conn()
         try:
             pedido = _obtener_pedido(conn, pedido_id)
             if pedido is None:
                 raise ValueError("El pedido indicado no existe.")
-            es_admin = session.get("usuario_rol") == "admin"
-            if not es_admin and pedido["usuario_id"] != session.get("usuario_id"):
+            if not _pedido_de_este_usuario(pedido):
                 raise ValueError("Ese pedido no es tuyo.")
-            if pedido["estado"] in ESTADOS_PAGADOS or conn.execute(
-                "SELECT 1 FROM pagos WHERE pedido_id=?", (pedido_id,)
-            ).fetchone():
+            if pedido["estado"] == ESTADO_CANCELADO:
+                raise ValueError("Ese pedido está cancelado.")
+            if pedido["estado"] in ESTADOS_PAGADOS or _pedido_tiene_pago(conn, pedido_id):
                 raise ValueError("Este pedido ya fue pagado.")
-            cobro = conn.execute(
-                "SELECT codigo FROM cobros_yappy "
-                "WHERE pedido_id=? AND estado='PENDIENTE'",
-                (pedido_id,),
-            ).fetchone()
         finally:
             conn.close()
+        return redirect(url_for("yappy_pagar", codigo=_obtener_o_crear_cobro(pedido)))
+    except (ValueError, RuntimeError, TypeError, sqlite3.Error) as e:
+        flash(f"No se pudo iniciar el pago: {e}", "danger")
+        return redirect(url_for("pedidos"))
 
-        # Si ya tenía un cobro pendiente, se reutiliza el mismo código.
-        if cobro:
-            return redirect(url_for("yappy_pagar", codigo=cobro["codigo"]))
 
-        codigo = generar_codigo_cobro()
-        ok, _, error = database.replicate_write(
-            "INSERT INTO cobros_yappy (pedido_id, codigo, monto, estado, fecha) "
-            "VALUES (?,?,?,?,?)",
-            (pedido_id, codigo, pedido["total"], "PENDIENTE",
-             datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-        )
+@app.route("/pedidos/<int:pedido_id>/cancelar", methods=["POST"])
+@requiere_admin
+def pedido_cancelar(pedido_id):
+    """Cancela un pedido. Solo el administrador puede hacerlo."""
+    try:
+        conn = database.get_local_conn()
+        try:
+            pedido = _obtener_pedido(conn, pedido_id)
+        finally:
+            conn.close()
+        if pedido is None:
+            raise ValueError("El pedido indicado no existe.")
+        if pedido["estado"] in ESTADOS_PAGADOS:
+            raise ValueError("No se puede cancelar un pedido ya pagado.")
+        if pedido["estado"] == ESTADO_CANCELADO:
+            raise ValueError("El pedido ya estaba cancelado.")
+        ok, _, error = database.replicate_transaction([
+            ("UPDATE pedidos SET estado=? WHERE id=?", (ESTADO_CANCELADO, pedido_id)),
+            ("UPDATE cobros_yappy SET estado='CANCELADO' "
+             "WHERE pedido_id=? AND estado='PENDIENTE'", (pedido_id,)),
+        ])
         if not ok:
             raise RuntimeError(error)
         if error:
             flash(error, "warning")
-        return redirect(url_for("yappy_pagar", codigo=codigo))
+        flash(f"Pedido #{pedido_id} cancelado.", "success")
+    except (ValueError, RuntimeError, sqlite3.Error) as e:
+        flash(f"No se pudo cancelar: {e}", "danger")
+    return redirect(url_for("pedidos"))
 
-    except (ValueError, RuntimeError, TypeError, sqlite3.Error) as e:
+
+@app.route("/pedidos/pagar-lote", methods=["POST"])
+@requiere_usuario
+def pedidos_pagar_lote():
+    """Paga varios pedidos a la vez: los seleccionados o todos los pendientes."""
+    try:
+        if request.form.get("todos"):
+            conn = database.get_local_conn()
+            try:
+                ids = [r["id"] for r in conn.execute(
+                    "SELECT p.id FROM pedidos p WHERE p.usuario_id=? "
+                    "AND p.estado NOT IN ('PAGADO','PAGADO - DESPACHAR (FLETE)','CANCELADO') "
+                    "AND NOT EXISTS (SELECT 1 FROM pagos g WHERE g.pedido_id=p.id) "
+                    "ORDER BY p.id",
+                    (session.get("usuario_id"),),
+                ).fetchall()]
+            finally:
+                conn.close()
+        else:
+            try:
+                ids = [int(x) for x in request.form.getlist("pedido_ids")]
+            except ValueError:
+                raise ValueError("Selección de pedidos no válida.")
+        if not ids:
+            raise ValueError("Selecciona al menos un pedido pendiente para pagar.")
+
+        codigos = []
+        for pid in ids:
+            conn = database.get_local_conn()
+            try:
+                pedido = _obtener_pedido(conn, pid)
+                pagado = pedido is not None and (
+                    pedido["estado"] in ESTADOS_PAGADOS or _pedido_tiene_pago(conn, pid)
+                )
+            finally:
+                conn.close()
+            if (pedido is None or not _pedido_de_este_usuario(pedido)
+                    or pedido["estado"] == ESTADO_CANCELADO or pagado):
+                continue
+            codigos.append(_obtener_o_crear_cobro(pedido))
+        if not codigos:
+            raise ValueError("No hay pedidos pendientes válidos para pagar.")
+        return redirect(url_for("yappy_lote", codigos=",".join(codigos)))
+    except (ValueError, RuntimeError, sqlite3.Error) as e:
         flash(f"No se pudo iniciar el pago: {e}", "danger")
         return redirect(url_for("pedidos"))
+
+
+@app.route("/yappy/lote/<codigos>", methods=["GET", "POST"])
+def yappy_lote(codigos):
+    """Página pública para pagar varios cobros juntos (con un QR del total)."""
+    lista = [c for c in codigos.split(",") if c]
+    try:
+        conn = database.get_local_conn()
+        try:
+            cobros = []
+            for cod in lista:
+                cobro = conn.execute(
+                    "SELECT * FROM cobros_yappy WHERE codigo=?", (cod,)
+                ).fetchone()
+                if cobro is not None:
+                    cobros.append((cobro, _obtener_pedido(conn, cobro["pedido_id"])))
+        finally:
+            conn.close()
+    except sqlite3.Error as e:
+        flash(f"Error al cargar los cobros: {e}", "danger")
+        cobros = []
+    if not cobros:
+        return render_template("yappy_lote.html", cobros=None), 404
+
+    pendientes = [(c, p) for c, p in cobros if c["estado"] == "PENDIENTE"]
+
+    if request.method == "POST" and pendientes:
+        pagados = 0
+        for cobro, pedido in pendientes:
+            try:
+                ok_pago, referencia, error_pago = simular_pago_yappy(cobro["monto"])
+                if not ok_pago:
+                    raise RuntimeError(error_pago)
+                _confirmar_cobro(cobro, pedido, referencia)
+                pagados += 1
+            except (ValueError, RuntimeError, sqlite3.Error) as e:
+                flash(f"Pedido #{pedido['id']}: {e}", "warning")
+        flash(f"Se pagaron {pagados} de {len(pendientes)} pedido(s).", "success")
+        return redirect(url_for("yappy_lote", codigos=codigos))
+
+    url_pago = _url_publica("yappy_lote", codigos=codigos)
+    return render_template(
+        "yappy_lote.html", cobros=cobros, pendientes=pendientes,
+        total=round(sum(c["monto"] for c, _ in cobros), 2),
+        total_pendiente=round(sum(c["monto"] for c, _ in pendientes), 2),
+        qr=qr_svg(url_pago), url_pago=url_pago, yappy_directorio=YAPPY_DIRECTORIO,
+    )
 
 
 # ----------------------------------------------------------------------

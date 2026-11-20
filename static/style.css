@@ -858,3 +858,15 @@ footer {
   }
   .motion-ready .reveal { opacity: 1; transform: none; }
 }
+
+/* --- Lista de pedidos: filtros, acciones y pago múltiple --- */
+.pedidos-barra { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0 1rem; }
+.filtros { display: flex; flex-wrap: wrap; gap: .4rem; }
+.btn-filtro {
+  border: 1px solid rgba(25, 58, 43, .25); background: #fff; color: #193a2b;
+  padding: .35rem .8rem; border-radius: 999px; cursor: pointer; font-size: .9rem;
+}
+.btn-filtro.is-active { background: #193a2b; color: #fff; border-color: #193a2b; }
+.acciones-pago { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1rem; }
+.btn-danger { background: #c95538; border-color: #c95538; color: #fff; }
+.btn-danger:hover { filter: brightness(.95); }

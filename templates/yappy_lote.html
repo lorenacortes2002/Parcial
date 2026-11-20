@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Pagar pedidos · CHINOS CAFÉ{% endblock %}
+{% block content %}
+<div class="checkout">
+  {% if cobros is none %}
+    <div class="empty-state"><p>Estos códigos de pago no existen o ya no son válidos.</p></div>
+  {% elif not pendientes %}
+    <div class="payment-success" role="status">
+      <span class="payment-success__icon" aria-hidden="true">✓</span>
+      <div>
+        <h2>¡Pagos realizados!</h2>
+        <p>Se pagaron {{ cobros|length }} pedido(s) a CHINOS CAFÉ, total
+          <strong>${{ "%.2f"|format(total) }}</strong>.</p>
+        <p class="muted">La confirmación de cada pedido se envía al correo del cliente.</p>
+      </div>
+    </div>
+  {% else %}
+    <div class="checkout-card">
+      <p class="eyebrow">Simulador de pago Yappy</p>
+      <h1>Pagar {{ pendientes|length }} pedido(s) juntos</h1>
+      <p class="muted">{{ yappy_directorio }}</p>
+
+      <table class="tabla">
+        <thead><tr><th>Pedido</th><th>Detalle</th><th>Monto</th></tr></thead>
+        <tbody>
+          {% for cobro, pedido in cobros %}
+          <tr>
+            <td>#{{ pedido.id }}</td>
+            <td>{{ pedido.pizza_nombre }}</td>
+            <td>
+              ${{ "%.2f"|format(cobro.monto) }}
+              {% if cobro.estado == 'PAGADO' %}<span class="estado">✓ Pagado</span>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <p class="checkout-amount">Total a pagar: ${{ "%.2f"|format(total_pendiente) }}</p>
+
+      <section class="payment-card" aria-labelledby="qr-title">
+        <h2 id="qr-title">Escanea el código QR</h2>
+        <div class="qr-box">{{ qr|safe }}</div>
+        <a class="small-link" href="{{ url_pago }}" target="_blank" rel="noopener">Abrir el enlace de pago en otra pestaña</a>
+      </section>
+
+      <form method="POST">
+        <button type="submit" class="btn btn-block">Pagar ${{ "%.2f"|format(total_pendiente) }}</button>
+      </form>
+      <p class="summary-footnote">Prototipo: este paso simula la aprobación en la app de Yappy; no se mueve dinero real.</p>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

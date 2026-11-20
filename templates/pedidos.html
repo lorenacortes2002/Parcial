@@ -262,17 +262,39 @@
 </form>
 
 {% if session.get('usuario_id') %}
+{% set es_admin = session.get('usuario_rol') == 'admin' %}
 <h2 class="section-title" id="pedidos-recientes">
-  {{ 'Todos los pedidos' if session.get('usuario_rol') == 'admin' else 'Mis pedidos' }}
+  {{ 'Todos los pedidos' if es_admin else 'Mis pedidos' }}
 </h2>
+
+<div class="pedidos-barra">
+  <div class="filtros" id="filtros-pedidos" role="group" aria-label="Filtrar pedidos">
+    <button type="button" class="btn-filtro is-active" data-filtro="todos">Todos</button>
+    <button type="button" class="btn-filtro" data-filtro="pendiente">Pendientes</button>
+    <button type="button" class="btn-filtro" data-filtro="pagado">Pagados</button>
+    <button type="button" class="btn-filtro" data-filtro="cancelado">Cancelados</button>
+  </div>
+</div>
+
+<form method="post" action="{{ url_for('pedidos_pagar_lote') }}" id="form-pedidos">
 <div class="table-wrap">
 <table class="tabla">
   <thead>
-    <tr><th>#</th><th>Cliente</th><th>Productos</th><th>Sodas</th><th>Total</th><th>Entrega</th><th>Estado</th><th>Fecha</th><th>Pago</th></tr>
+    <tr>
+      {% if not es_admin %}<th><input type="checkbox" id="check-todos" aria-label="Seleccionar todos"></th>{% endif %}
+      <th>#</th><th>Cliente</th><th>Productos</th><th>Sodas</th><th>Total</th><th>Entrega</th><th>Estado</th><th>Fecha</th><th>Pago</th>
+      {% if es_admin %}<th>Acciones</th>{% endif %}
+    </tr>
   </thead>
   <tbody>
     {% for pe in pedidos %}
-    <tr>
+    {% set pagado = 'PAGADO' in pe.estado %}
+    {% set cancelado = pe.estado == 'CANCELADO' %}
+    {% set pendiente = not pagado and not cancelado %}
+    <tr data-estado="{{ 'pagado' if pagado else 'cancelado' if cancelado else 'pendiente' }}">
+      {% if not es_admin %}
+      <td>{% if pendiente %}<input type="checkbox" class="check-pedido" name="pedido_ids" value="{{ pe.id }}">{% endif %}</td>
+      {% endif %}
       <td>{{ pe.id }}</td>
       <td>{{ pe.cliente }}</td>
       <td>{{ pe.pizza_nombre }}</td>
@@ -285,24 +307,40 @@
       <td><span class="estado">{{ pe.estado }}</span></td>
       <td>{{ pe.fecha }}</td>
       <td>
-        {% if 'PAGADO' in pe.estado %}
+        {% if pagado %}
           <span class="estado">✓ Pagado</span>
+        {% elif cancelado %}
+          <span class="estado">✖ Cancelado</span>
         {% else %}
-          <form method="post" action="{{ url_for('pedido_pagar', pedido_id=pe.id) }}">
-            <button type="submit" class="btn">Pagar con Yappy</button>
-          </form>
+          <button type="submit" class="btn" formaction="{{ url_for('pedido_pagar', pedido_id=pe.id) }}">Pagar con Yappy</button>
         {% endif %}
       </td>
+      {% if es_admin %}
+      <td>
+        {% if pendiente %}
+          <button type="submit" class="btn btn-danger" formaction="{{ url_for('pedido_cancelar', pedido_id=pe.id) }}">Cancelar</button>
+        {% endif %}
+      </td>
+      {% endif %}
     </tr>
     {% else %}
-    <tr><td colspan="9">Todavía no hay pedidos registrados.</td></tr>
+    <tr><td colspan="12">Todavía no hay pedidos registrados.</td></tr>
     {% endfor %}
   </tbody>
 </table>
 </div>
+
+{% if not es_admin %}
+<div class="acciones-pago">
+  <button type="submit" class="btn">Pagar seleccionados</button>
+  <button type="submit" class="btn" name="todos" value="1">Pagar todos los pendientes</button>
+</div>
+{% endif %}
+</form>
 {% endif %}
 {% endblock %}
 {% block scripts %}
 <script src="{{ url_for('static', filename='click-select.js') }}" defer></script>
 <script src="{{ url_for('static', filename='order.js') }}" defer></script>
+<script src="{{ url_for('static', filename='mis-pedidos.js') }}" defer></script>
 {% endblock %}
