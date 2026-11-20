@@ -101,13 +101,15 @@ Si `FLASK_SECRET_KEY` no está definida, se genera una clave temporal al iniciar
 El menú permanece público. Para agregar productos o confirmar un pedido, el cliente debe iniciar
 sesión o registrarse con nombre, correo y una contraseña de al menos 12 caracteres. Las contraseñas
 se guardan como hashes; cada cliente solo ve sus pedidos. No se envía un correo de verificación
-en esta versión.
+en esta versión. Los clientes y administradores pueden cambiar su contraseña desde la opción
+**Contraseña** de su sesión.
 
 El primer administrador se crea desde las variables `ADMIN_EMAIL` y `ADMIN_PASSWORD` del archivo
 local `.env` (no las subas a GitHub). La contraseña debe tener al menos 12 caracteres. No existe
 registro público de administradores. Después de crear la cuenta, el administrador puede entrar a
-`/admin` para gestionar productos, pedidos, pagos y consultar clientes. Si la base de datos ya tiene
-un administrador, cambiar esas variables no reemplaza su contraseña.
+`/admin/login` (acceso directo, no visible en el menú público) para gestionar productos, pedidos,
+pagos y consultar clientes. El inicio de sesión reconoce el rol y redirige al panel apropiado.
+Si la base de datos ya tiene un administrador, cambiar esas variables no reemplaza su contraseña.
 
 ## 2. Despliegue en el servidor Linux con NGINX (sucursal Veraguas)
 

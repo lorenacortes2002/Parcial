@@ -976,14 +976,26 @@ class ProjectRequirementsTests(unittest.TestCase):
     def test_all_application_pages_render(self):
         for path in (
             "/", "/admin", "/admin/clientes", "/fabrica", "/fabrica/nueva",
-            "/pedidos", "/pagos",
+            "/pedidos", "/pagos", "/cuenta/seguridad",
         ):
             with self.subTest(path=path):
                 self.assertEqual(self.client.get(path).status_code, 200)
         guest = webapp.app.test_client()
         self.assertEqual(guest.get("/").status_code, 200)
-        self.assertEqual(guest.get("/cuenta/login").status_code, 200)
+        client_login = guest.get("/cuenta/login")
+        self.assertEqual(client_login.status_code, 200)
+        self.assertIn(b"Acceso cliente", client_login.data)
+        self.assertNotIn(b".env", client_login.data)
         self.assertEqual(guest.get("/cuenta/registro").status_code, 200)
+        homepage = guest.get("/")
+        self.assertIn(b"Acceso cliente", homepage.data)
+        self.assertNotIn(b"Acceso administrador", homepage.data)
+        self.assertIn(b"Administraci\xc3\xb3n", self.client.get("/").data)
+
+        admin_login = guest.get("/admin/login", follow_redirects=True)
+        self.assertEqual(admin_login.status_code, 200)
+        self.assertIn(b"Acceso de administrador", admin_login.data)
+        self.assertNotIn(b"Reg\xc3\xadstrate", admin_login.data)
 
     def test_staff_pages_require_login_and_customer_views_hide_private_data(self):
         self.client.post("/pedidos", data={
@@ -1011,6 +1023,9 @@ class ProjectRequirementsTests(unittest.TestCase):
                 self.assertIn("/cuenta/login", response.headers["Location"])
         mutation = guest.post("/fabrica/eliminar/1")
         self.assertEqual(mutation.status_code, 302)
+        admin_entry = guest.get("/admin/login")
+        self.assertEqual(admin_entry.status_code, 302)
+        self.assertEqual(admin_entry.headers["Location"], "/admin")
 
         order_page = guest.get("/pedidos")
         self.assertEqual(order_page.status_code, 302)
@@ -1022,7 +1037,7 @@ class ProjectRequirementsTests(unittest.TestCase):
         self.assertNotIn("privado@example.com", qr_page)
         self.assertNotIn("Pepperoni Clásica", qr_page)
 
-    def test_login_rejects_bad_password_and_external_redirect(self):
+    def test_login_rejects_bad_password_and_routes_admin_by_role(self):
         guest = webapp.app.test_client()
         rejected = guest.post(
             "/cuenta/login",
@@ -1040,11 +1055,22 @@ class ProjectRequirementsTests(unittest.TestCase):
             data={
                 "correo": "admin@example.test",
                 "password": "test-staff-password",
-                "next": "https://example.com",
+                "next": "/pedidos?pizza_id=1",
             },
         )
         self.assertEqual(accepted.status_code, 302)
         self.assertEqual(accepted.headers["Location"], "/admin")
+
+        external = webapp.app.test_client().post(
+            "/cuenta/login",
+            data={
+                "correo": "admin@example.test",
+                "password": "test-staff-password",
+                "next": "https://example.com",
+            },
+        )
+        self.assertEqual(external.status_code, 302)
+        self.assertEqual(external.headers["Location"], "/admin")
 
     def test_client_registration_hashes_password_and_orders_require_login(self):
         guest = webapp.app.test_client()
@@ -1106,12 +1132,14 @@ class ProjectRequirementsTests(unittest.TestCase):
         })
 
         customer = webapp.app.test_client()
-        customer.post("/cuenta/registro", data={
+        registered = customer.post("/cuenta/registro", data={
             "nombre": "Ana Cliente",
             "correo": "ana@example.test",
             "password": "clave-segura-de-ana-123",
             "confirmacion": "clave-segura-de-ana-123",
+            "next": "/admin",
         })
+        self.assertEqual(registered.headers["Location"], "/pedidos")
 
         response = customer.get("/admin")
         self.assertEqual(response.status_code, 302)
@@ -1119,6 +1147,28 @@ class ProjectRequirementsTests(unittest.TestCase):
         page = customer.get("/pedidos").get_data(as_text=True)
         self.assertIn("Mis pedidos", page)
         self.assertNotIn("Otro cliente", page)
+
+    def test_account_password_can_be_changed_and_used_for_login(self):
+        response = self.client.post("/cuenta/seguridad", data={
+            "actual": "test-staff-password",
+            "nueva": "nueva-clave-segura-123",
+            "confirmacion": "nueva-clave-segura-123",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/admin")
+
+        guest = webapp.app.test_client()
+        old_password = guest.post("/cuenta/login", data={
+            "correo": "admin@example.test",
+            "password": "test-staff-password",
+        })
+        self.assertEqual(old_password.status_code, 200)
+        new_password = guest.post("/cuenta/login", data={
+            "correo": "admin@example.test",
+            "password": "nueva-clave-segura-123",
+        })
+        self.assertEqual(new_password.status_code, 302)
+        self.assertEqual(new_password.headers["Location"], "/admin")
 
     def test_admin_is_created_from_environment_config(self):
         admin = self._rows(

@@ -57,6 +57,21 @@ def _local_redirect(target, fallback=None):
     return fallback or url_for("index")
 
 
+def _destino_usuario(rol, target):
+    fallback = url_for("admin_dashboard") if rol == "admin" else url_for("pedidos")
+    destino = _local_redirect(target, fallback)
+    path = urlsplit(destino).path
+    if rol == "admin":
+        if (
+            path == "/admin" or path.startswith("/admin/")
+            or path == "/fabrica" or path.startswith("/fabrica/")
+            or path == "/pagos" or path.startswith("/pagos/")
+        ):
+            return destino
+        return url_for("admin_dashboard")
+    return destino if path == "/pedidos" else url_for("pedidos")
+
+
 def _correo_valido(correo):
     return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", correo))
 
@@ -174,7 +189,7 @@ def cuenta_registro():
             _establecer_sesion(usuario)
             flash("Tu cuenta quedó creada. Ya puedes hacer tu pedido.", "success")
             siguiente = request.form.get("next", "")
-            return redirect(_local_redirect(siguiente, url_for("pedidos")))
+            return redirect(_destino_usuario("cliente", siguiente))
         except ValueError as e:
             flash(str(e), "danger")
         except sqlite3.IntegrityError:
@@ -218,20 +233,68 @@ def cuenta_login():
         if usuario and check_password_hash(usuario["password_hash"], password):
             _establecer_sesion(usuario)
             flash(f"Bienvenido, {usuario['nombre']}.", "success")
-            destino = url_for("admin_dashboard") if usuario["rol"] == "admin" else url_for("pedidos")
-            return redirect(_local_redirect(siguiente, destino))
+            return redirect(_destino_usuario(usuario["rol"], siguiente))
         flash("Correo o contraseña incorrectos.", "danger")
 
     return render_template(
         "cuenta_login.html", correo=correo, siguiente=siguiente,
         admin_configurado=admin_configurado,
+        es_acceso_admin=siguiente.startswith("/admin"),
     )
+
+
+@app.route("/cuenta/seguridad", methods=["GET", "POST"])
+@requiere_usuario
+def cuenta_seguridad():
+    conn = database.get_local_conn()
+    try:
+        usuario = conn.execute(
+            "SELECT id, password_hash, rol FROM usuarios WHERE id=?",
+            (session["usuario_id"],),
+        ).fetchone()
+        if usuario is None:
+            session.clear()
+            flash("La cuenta ya no existe. Inicia sesión nuevamente.", "warning")
+            return redirect(url_for("cuenta_login"))
+
+        if request.method == "POST":
+            actual = request.form.get("actual", "")
+            nueva = request.form.get("nueva", "")
+            confirmacion = request.form.get("confirmacion", "")
+            if not check_password_hash(usuario["password_hash"], actual):
+                flash("La contraseña actual es incorrecta.", "danger")
+            elif len(nueva) < 12:
+                flash("La nueva contraseña debe tener al menos 12 caracteres.", "danger")
+            elif nueva != confirmacion:
+                flash("Las contraseñas nuevas no coinciden.", "danger")
+            else:
+                conn.execute(
+                    "UPDATE usuarios SET password_hash=? WHERE id=?",
+                    (generate_password_hash(nueva), usuario["id"]),
+                )
+                conn.commit()
+                flash("Tu contraseña se actualizó correctamente.", "success")
+                destino = (
+                    url_for("admin_dashboard")
+                    if usuario["rol"] == "admin" else url_for("pedidos")
+                )
+                return redirect(destino)
+    except sqlite3.Error as e:
+        flash(f"No se pudo actualizar la contraseña: {e}", "danger")
+    finally:
+        conn.close()
+    return render_template("cuenta_seguridad.html")
 
 
 @app.route("/cuenta/salir")
 def cuenta_salir():
     session.clear()
     return redirect(url_for("index"))
+
+
+@app.route("/admin/login")
+def admin_login():
+    return redirect(url_for("admin_dashboard"))
 
 
 @app.route("/personal/login")

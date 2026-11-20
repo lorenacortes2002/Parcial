@@ -1,10 +1,19 @@
 {% extends "base.html" %}
-{% block title %}Iniciar sesión · CHINOS CAFÉ{% endblock %}
+{% block title %}{% if es_acceso_admin %}Acceso de administrador{% else %}Acceso cliente{% endif %} · CHINOS CAFÉ{% endblock %}
 {% block content %}
 <div class="checkout">
   <section class="checkout-card">
-    <p class="eyebrow">Tu cuenta</p>
-    <h1>Iniciar sesión</h1>
+    {% if es_acceso_admin %}
+      <p class="eyebrow">Área privada</p>
+      <h1>Acceso de administrador</h1>
+      <p class="muted">Usa la cuenta de administrador para entrar al panel. No hay registro público de administradores.</p>
+    {% elif siguiente.startswith('/pedidos') %}
+      <p class="eyebrow">Acceso cliente</p>
+      <h1>Inicia sesión para hacer tu pedido</h1>
+    {% else %}
+      <p class="eyebrow">Acceso cliente</p>
+      <h1>Inicia sesión como cliente</h1>
+    {% endif %}
     <form method="POST" class="form">
       <input type="hidden" name="next" value="{{ siguiente }}">
       <label for="correo">Correo electrónico</label>
@@ -14,13 +23,14 @@
       <input id="password" name="password" type="password"
         autocomplete="current-password" required>
       <div class="form-actions">
-        <button type="submit" class="btn btn-block">Ingresar</button>
+        <button type="submit" class="btn btn-block">{{ "Ingresar al panel" if es_acceso_admin else "Ingresar" }}</button>
       </div>
     </form>
-    <p class="summary-footnote">
-      ¿Aún no tienes cuenta? <a href="{{ url_for('cuenta_registro', next=siguiente) }}">Regístrate</a>.
-    </p>
-    {% if not admin_configurado %}
+    {% if not es_acceso_admin %}
+      <p class="summary-footnote">
+        ¿Aún no tienes cuenta? <a href="{{ url_for('cuenta_registro', next=siguiente) }}">Regístrate</a>.
+      </p>
+    {% elif not admin_configurado %}
       <p class="summary-footnote">La cuenta administrativa inicial debe configurarse en el archivo local <code>.env</code>.</p>
     {% endif %}
   </section>
