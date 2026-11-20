@@ -528,8 +528,9 @@ class ProjectRequirementsTests(unittest.TestCase):
         menu = self.client.get("/").get_data(as_text=True)
         self.assertIn("Combos", menu)
         self.assertIn("Pizzas individuales", menu)
-        self.assertLess(menu.index("Hawaiana"), menu.index("Pizzas individuales"))
-        self.assertGreater(menu.index("<h3>Solo Pepperoni</h3>"), menu.index("Pizzas individuales"))
+        pizzas_section = menu.index('<section class="menu-section" id="pizzas"')
+        self.assertLess(menu.index("Hawaiana"), pizzas_section)
+        self.assertGreater(menu.index("<h3>Solo Pepperoni</h3>"), pizzas_section)
 
         # Las pizzas individuales también pueden llevar sodas (se cobran todas).
         self.client.post(

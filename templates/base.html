@@ -14,7 +14,7 @@
     <span class="brand-mark" aria-hidden="true">C</span>
     <span class="brand-name">CHINOS CAFÉ<span class="brand-subtitle">PIZZERÍA ARTESANAL</span></span>
   </a>
-  <nav>
+  <nav class="site-nav">
     <a class="{{ 'active' if request.endpoint == 'index' else '' }}" href="{{ url_for('index') }}">Menú</a>
     <a class="{{ 'active' if request.endpoint == 'pedidos' else '' }}" href="{{ url_for('pedidos') }}">Pedir</a>
     {% if session.get('usuario_rol') == 'admin' %}
@@ -31,7 +31,7 @@
       <a href="{{ url_for('cuenta_salir') }}">Salir</a>
     {% else %}
       <a class="{{ 'active' if request.endpoint == 'cuenta_login' else '' }}" href="{{ url_for('cuenta_login') }}">Acceso cliente</a>
-      <a class="{{ 'active' if request.endpoint == 'cuenta_registro' else '' }}" href="{{ url_for('cuenta_registro') }}">Crear cuenta</a>
+      <a class="nav-cta {{ 'active' if request.endpoint == 'cuenta_registro' else '' }}" href="{{ url_for('cuenta_registro') }}">Crear cuenta</a>
     {% endif %}
   </nav>
 </header>
