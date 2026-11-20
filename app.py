@@ -62,7 +62,7 @@ TAMANOS_SODA = {
     "1 LITRO": "1 litro",
     "2 LITROS": "2 litros",
 }
-MAX_SODAS = 20
+MAX_SODAS = 100
 # Precio de cada soda según su tamaño (USD). Los combos incluyen una lata por combo.
 PRECIOS_SODA = {
     "LATA 12 OZ": 1.00,
@@ -478,7 +478,7 @@ def fabrica_eliminar(pizza_id):
 # (cada uno con sus sodas), indica sus datos y confirma. El pedido se guarda
 # en la DB local y se replica; el JSON se envía por correo al pagarlo.
 # ----------------------------------------------------------------------
-MAX_CANTIDAD_ITEM = 50
+MAX_CANTIDAD_ITEM = 100
 MAX_ITEMS_CARRITO = 15
 
 # Bordes de la pizza (como en Domino's): nombre, precio por pizza y descripción.
