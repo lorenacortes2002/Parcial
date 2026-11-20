@@ -167,6 +167,7 @@
       </div>
     </div>
     <div class="form-grid">
+      {% if session.get('usuario_rol') == 'admin' %}
       <div class="form-field">
         <label for="cliente">Nombre del cliente</label>
         <input id="cliente" type="text" name="cliente" autocomplete="name" required
@@ -177,6 +178,12 @@
         <input id="correo-cliente" type="email" name="correo_cliente" autocomplete="email" required
           value="{{ cliente.get('correo_cliente', '') }}">
       </div>
+      {% else %}
+      <p class="form-field form-field--full">
+        Pedido para <strong>{{ session.get('usuario_nombre') }}</strong>
+        · {{ session.get('usuario_correo') }}
+      </p>
+      {% endif %}
       <div class="form-field">
         <label for="entrega">Entrega</label>
         <select id="entrega" name="retiro_o_flete" aria-describedby="entrega-help"
@@ -254,7 +261,10 @@
 </div>
 </form>
 
-<h2 class="section-title">Pedidos recientes</h2>
+{% if session.get('usuario_id') %}
+<h2 class="section-title" id="pedidos-recientes">
+  {{ 'Todos los pedidos' if session.get('usuario_rol') == 'admin' else 'Mis pedidos' }}
+</h2>
 <div class="table-wrap">
 <table class="tabla">
   <thead>
@@ -281,6 +291,7 @@
   </tbody>
 </table>
 </div>
+{% endif %}
 {% endblock %}
 {% block scripts %}
 <script src="{{ url_for('static', filename='click-select.js') }}" defer></script>

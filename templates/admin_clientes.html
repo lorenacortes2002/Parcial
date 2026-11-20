@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Clientes · Administración · CHINOS CAFÉ{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <p class="eyebrow">Administración</p>
+  <h1>Clientes registrados</h1>
+  <p>Los clientes crean sus cuentas desde la tienda. Las contraseñas no se muestran ni se almacenan en texto legible.</p>
+</div>
+
+<div class="table-wrap">
+  <table class="tabla">
+    <thead>
+      <tr><th>#</th><th>Nombre</th><th>Correo</th><th>Registro</th></tr>
+    </thead>
+    <tbody>
+      {% for cliente in clientes %}
+      <tr>
+        <td>{{ cliente.id }}</td>
+        <td>{{ cliente.nombre }}</td>
+        <td>{{ cliente.correo }}</td>
+        <td>{{ cliente.fecha_creacion }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4">Todavía no hay clientes registrados.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

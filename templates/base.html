@@ -16,9 +16,21 @@
   </a>
   <nav>
     <a class="{{ 'active' if request.endpoint == 'index' else '' }}" href="{{ url_for('index') }}">Menú</a>
-    <a class="{{ 'active' if request.endpoint in ['fabrica', 'fabrica_nueva', 'fabrica_editar'] else '' }}" href="{{ url_for('fabrica') }}">Fábrica</a>
-    <a class="{{ 'active' if request.endpoint == 'pedidos' else '' }}" href="{{ url_for('pedidos') }}">Pedidos</a>
-    <a class="{{ 'active' if request.endpoint in ['pagos', 'cobro_yappy', 'yappy_pagar'] else '' }}" href="{{ url_for('pagos') }}">Pagos</a>
+    <a class="{{ 'active' if request.endpoint == 'pedidos' else '' }}" href="{{ url_for('pedidos') }}">Pedir</a>
+    {% if session.get('usuario_rol') == 'admin' %}
+      <a class="{{ 'active' if request.endpoint == 'admin_dashboard' else '' }}" href="{{ url_for('admin_dashboard') }}">Administración</a>
+      <a class="{{ 'active' if request.endpoint in ['fabrica', 'fabrica_nueva', 'fabrica_editar'] else '' }}" href="{{ url_for('fabrica') }}">Productos</a>
+      <a href="{{ url_for('pedidos') }}#pedidos-recientes">Pedidos</a>
+      <a class="{{ 'active' if request.endpoint in ['pagos', 'cobro_yappy'] else '' }}" href="{{ url_for('pagos') }}">Pagos</a>
+      <a class="{{ 'active' if request.endpoint == 'admin_clientes' else '' }}" href="{{ url_for('admin_clientes') }}">Clientes</a>
+      <a href="{{ url_for('cuenta_salir') }}">Salir</a>
+    {% elif session.get('usuario_id') %}
+      <a href="{{ url_for('pedidos') }}#pedidos-recientes">Mis pedidos</a>
+      <a href="{{ url_for('cuenta_salir') }}">Salir</a>
+    {% else %}
+      <a class="{{ 'active' if request.endpoint == 'cuenta_login' else '' }}" href="{{ url_for('cuenta_login') }}">Iniciar sesión</a>
+      <a class="{{ 'active' if request.endpoint == 'cuenta_registro' else '' }}" href="{{ url_for('cuenta_registro') }}">Crear cuenta</a>
+    {% endif %}
   </nav>
 </header>
 

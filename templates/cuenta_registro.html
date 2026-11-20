@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Crear cuenta · CHINOS CAFÉ{% endblock %}
+{% block content %}
+<div class="checkout">
+  <section class="checkout-card">
+    <p class="eyebrow">Únete a CHINOS CAFÉ</p>
+    <h1>Crear cuenta</h1>
+    <form method="POST" class="form">
+      <input type="hidden" name="next" value="{{ siguiente }}">
+      <label for="nombre">Nombre</label>
+      <input id="nombre" name="nombre" type="text" autocomplete="name"
+        minlength="2" maxlength="80" required>
+      <label for="correo">Correo electrónico</label>
+      <input id="correo" name="correo" type="email" autocomplete="email"
+        value="{{ correo }}" required>
+      <label for="password">Contraseña (mínimo 12 caracteres)</label>
+      <input id="password" name="password" type="password"
+        autocomplete="new-password" minlength="12" required>
+      <label for="confirmacion">Repite la contraseña</label>
+      <input id="confirmacion" name="confirmacion" type="password"
+        autocomplete="new-password" minlength="12" required>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-block">Crear cuenta</button>
+      </div>
+    </form>
+    <p class="summary-footnote">
+      ¿Ya tienes cuenta? <a href="{{ url_for('cuenta_login', next=siguiente) }}">Inicia sesión</a>.
+    </p>
+  </section>
+</div>
+{% endblock %}

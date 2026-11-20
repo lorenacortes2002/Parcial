@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Administración · CHINOS CAFÉ{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <p class="eyebrow">Área privada</p>
+  <h1>Panel de administración</h1>
+  <p>Gestiona el catálogo, los clientes, los pedidos y los pagos desde un solo lugar.</p>
+</div>
+
+<div class="payment-layout">
+  <section class="payment-card">
+    <p class="eyebrow">Catálogo</p>
+    <h2>{{ resumen.productos }} productos</h2>
+    <a class="btn" href="{{ url_for('fabrica') }}">Administrar productos</a>
+  </section>
+  <section class="payment-card">
+    <p class="eyebrow">Operación</p>
+    <h2>{{ resumen.pedidos }} pedidos</h2>
+    <p class="muted">{{ resumen.pendientes }} pendientes de pago</p>
+    <a class="btn" href="{{ url_for('pedidos') }}#pedidos-recientes">Ver pedidos</a>
+  </section>
+  <section class="payment-card">
+    <p class="eyebrow">Clientes</p>
+    <h2>{{ resumen.clientes }} cuentas</h2>
+    <a class="btn" href="{{ url_for('admin_clientes') }}">Ver clientes</a>
+  </section>
+  <section class="payment-card">
+    <p class="eyebrow">Cobros</p>
+    <h2>Pagos y Yappy</h2>
+    <a class="btn" href="{{ url_for('pagos') }}">Administrar pagos</a>
+  </section>
+</div>
+{% endblock %}

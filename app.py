@@ -13,18 +13,21 @@ Para producción (servidor Linux con NGINX) ver README.md
 -------------------------------------------------
 """
 
+import math
 import os
+import re
 import secrets
 import socket
-import math
-import re
 import sqlite3
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
+from functools import wraps
+from urllib.parse import urlsplit
 
 from flask import (
     Flask, render_template, request, redirect, url_for, flash, jsonify, session,
 )
+from werkzeug.security import check_password_hash, generate_password_hash
 
 import database
 from utils import (
@@ -35,6 +38,251 @@ from utils import (
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["ADMIN_EMAIL"] = os.environ.get("ADMIN_EMAIL", "").strip().lower()
+app.config["ADMIN_PASSWORD"] = os.environ.get("ADMIN_PASSWORD", "")
+
+
+def _local_redirect(target, fallback=None):
+    target = target or ""
+    parsed = urlsplit(target)
+    if (
+        target.startswith("/") and not target.startswith("//")
+        and "\\" not in target and not parsed.netloc
+        and not re.search(r"%(?:2f|5c)", parsed.path, re.IGNORECASE)
+        and not any(ord(char) < 32 for char in target)
+    ):
+        return target
+    return fallback or url_for("index")
+
+
+def _correo_valido(correo):
+    return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", correo))
+
+
+def _bootstrap_admin():
+    correo = app.config["ADMIN_EMAIL"]
+    password = app.config["ADMIN_PASSWORD"]
+    conn = database.get_local_conn()
+    try:
+        if conn.execute("SELECT 1 FROM usuarios WHERE rol='admin' LIMIT 1").fetchone():
+            return True
+        if not correo and not password:
+            return False
+        if not correo or not password:
+            raise ValueError("Configura ADMIN_EMAIL y ADMIN_PASSWORD en el archivo .env.")
+        if not _correo_valido(correo):
+            raise ValueError("ADMIN_EMAIL no es un correo válido.")
+        if len(password) < 12:
+            raise ValueError("ADMIN_PASSWORD debe tener al menos 12 caracteres.")
+        if conn.execute("SELECT 1 FROM usuarios WHERE correo=?", (correo,)).fetchone():
+            raise ValueError("ADMIN_EMAIL ya está registrado como cliente.")
+
+        conn.execute(
+            "INSERT INTO usuarios (nombre, correo, password_hash, rol, fecha_creacion) "
+            "VALUES (?,?,?,?,?)",
+            (
+                "Administrador", correo, generate_password_hash(password), "admin",
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            ),
+        )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def _establecer_sesion(usuario):
+    carrito = session.get("carrito", [])
+    session.clear()
+    session["carrito"] = carrito
+    session["usuario_id"] = usuario["id"]
+    session["usuario_nombre"] = usuario["nombre"]
+    session["usuario_correo"] = usuario["correo"]
+    session["usuario_rol"] = usuario["rol"]
+
+
+def requiere_usuario(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if session.get("usuario_id"):
+            return view(*args, **kwargs)
+        siguiente = request.full_path.rstrip("?")
+        return redirect(url_for("cuenta_login", next=siguiente))
+
+    return wrapped
+
+
+def requiere_admin(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if session.get("usuario_rol") == "admin":
+            return view(*args, **kwargs)
+        if session.get("usuario_id"):
+            flash("Esta sección está reservada para administración.", "danger")
+            return redirect(url_for("index"))
+        siguiente = request.full_path.rstrip("?")
+        return redirect(url_for("cuenta_login", next=siguiente))
+
+    return wrapped
+
+
+@app.route("/cuenta/registro", methods=["GET", "POST"])
+def cuenta_registro():
+    try:
+        _bootstrap_admin()
+    except (ValueError, sqlite3.Error) as e:
+        flash(f"No se pudo preparar el acceso administrativo: {e}", "danger")
+
+    if session.get("usuario_id"):
+        return redirect(url_for("admin_dashboard" if session.get("usuario_rol") == "admin" else "pedidos"))
+
+    correo = ""
+    if request.method == "POST":
+        nombre = " ".join(request.form.get("nombre", "").split())
+        correo = request.form.get("correo", "").strip().lower()
+        password = request.form.get("password", "")
+        confirmacion = request.form.get("confirmacion", "")
+        try:
+            if not 2 <= len(nombre) <= 80:
+                raise ValueError("El nombre debe tener entre 2 y 80 caracteres.")
+            if not _correo_valido(correo):
+                raise ValueError("Indica un correo electrónico válido.")
+            if len(password) < 12:
+                raise ValueError("La contraseña debe tener al menos 12 caracteres.")
+            if password != confirmacion:
+                raise ValueError("Las contraseñas no coinciden.")
+
+            conn = database.get_local_conn()
+            try:
+                cursor = conn.execute(
+                    "INSERT INTO usuarios (nombre, correo, password_hash, rol, fecha_creacion) "
+                    "VALUES (?,?,?,?,?)",
+                    (
+                        nombre, correo, generate_password_hash(password), "cliente",
+                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    ),
+                )
+                conn.commit()
+                usuario = {
+                    "id": cursor.lastrowid, "nombre": nombre,
+                    "correo": correo, "rol": "cliente",
+                }
+            finally:
+                conn.close()
+            _establecer_sesion(usuario)
+            flash("Tu cuenta quedó creada. Ya puedes hacer tu pedido.", "success")
+            siguiente = request.form.get("next", "")
+            return redirect(_local_redirect(siguiente, url_for("pedidos")))
+        except ValueError as e:
+            flash(str(e), "danger")
+        except sqlite3.IntegrityError:
+            flash("Ya existe una cuenta con ese correo.", "danger")
+        except sqlite3.Error as e:
+            flash(f"No se pudo crear la cuenta: {e}", "danger")
+
+    return render_template(
+        "cuenta_registro.html", correo=correo,
+        siguiente=request.args.get("next") or request.form.get("next", ""),
+    )
+
+
+@app.route("/cuenta/login", methods=["GET", "POST"])
+def cuenta_login():
+    try:
+        admin_configurado = _bootstrap_admin()
+    except (ValueError, sqlite3.Error) as e:
+        flash(f"No se pudo preparar el acceso administrativo: {e}", "danger")
+        admin_configurado = False
+
+    if session.get("usuario_id"):
+        return redirect(url_for("admin_dashboard" if session.get("usuario_rol") == "admin" else "pedidos"))
+
+    siguiente = request.args.get("next") or request.form.get("next", "")
+    correo = ""
+    if request.method == "POST":
+        correo = request.form.get("correo", "").strip().lower()
+        password = request.form.get("password", "")
+        conn = database.get_local_conn()
+        try:
+            usuario = conn.execute(
+                "SELECT id, nombre, correo, password_hash, rol FROM usuarios WHERE correo=?",
+                (correo,),
+            ).fetchone()
+        except sqlite3.Error as e:
+            flash(f"No se pudo consultar la cuenta: {e}", "danger")
+            usuario = None
+        finally:
+            conn.close()
+        if usuario and check_password_hash(usuario["password_hash"], password):
+            _establecer_sesion(usuario)
+            flash(f"Bienvenido, {usuario['nombre']}.", "success")
+            destino = url_for("admin_dashboard") if usuario["rol"] == "admin" else url_for("pedidos")
+            return redirect(_local_redirect(siguiente, destino))
+        flash("Correo o contraseña incorrectos.", "danger")
+
+    return render_template(
+        "cuenta_login.html", correo=correo, siguiente=siguiente,
+        admin_configurado=admin_configurado,
+    )
+
+
+@app.route("/cuenta/salir")
+def cuenta_salir():
+    session.clear()
+    return redirect(url_for("index"))
+
+
+@app.route("/personal/login")
+def personal_login():
+    return redirect(url_for("cuenta_login", next=request.args.get("next") or url_for("admin_dashboard")))
+
+
+@app.route("/personal/salir")
+def personal_logout():
+    return redirect(url_for("cuenta_salir"))
+
+
+@app.route("/admin")
+@requiere_admin
+def admin_dashboard():
+    conn = database.get_local_conn()
+    try:
+        resumen = {
+            "clientes": conn.execute(
+                "SELECT COUNT(*) FROM usuarios WHERE rol='cliente'"
+            ).fetchone()[0],
+            "pedidos": conn.execute("SELECT COUNT(*) FROM pedidos").fetchone()[0],
+            "pendientes": conn.execute(
+                "SELECT COUNT(*) FROM pedidos WHERE estado NOT IN "
+                "('PAGADO', 'PAGADO - DESPACHAR (FLETE)')"
+            ).fetchone()[0],
+            "productos": conn.execute("SELECT COUNT(*) FROM pizzas").fetchone()[0],
+        }
+    except sqlite3.Error as e:
+        flash(f"No se pudo cargar el resumen administrativo: {e}", "danger")
+        resumen = {"clientes": 0, "pedidos": 0, "pendientes": 0, "productos": 0}
+    finally:
+        conn.close()
+    return render_template("admin.html", resumen=resumen)
+
+
+@app.route("/admin/clientes")
+@requiere_admin
+def admin_clientes():
+    conn = database.get_local_conn()
+    try:
+        clientes = conn.execute(
+            "SELECT id, nombre, correo, fecha_creacion FROM usuarios "
+            "WHERE rol='cliente' ORDER BY id DESC"
+        ).fetchall()
+    except sqlite3.Error as e:
+        flash(f"No se pudo cargar la lista de clientes: {e}", "danger")
+        clientes = []
+    finally:
+        conn.close()
+    return render_template("admin_clientes.html", clientes=clientes)
 
 MIN_DIRECCION = 10
 MAX_DIRECCION = 300
@@ -313,6 +561,7 @@ def index():
 # FABRICA — CRUD de combos y pizzas (ingredientes, refrescos)
 # ----------------------------------------------------------------------
 @app.route("/fabrica")
+@requiere_admin
 def fabrica():
     try:
         conn = database.get_local_conn()
@@ -329,6 +578,7 @@ def fabrica():
 
 
 @app.route("/fabrica/sincronizar-replica", methods=["POST"])
+@requiere_admin
 def fabrica_sincronizar_replica():
     """Envía a cada máquina virtual una copia completa (por si estuvo apagada)."""
     resultados = database.sincronizar_replicas_remotas()
@@ -338,6 +588,7 @@ def fabrica_sincronizar_replica():
 
 
 @app.route("/fabrica/nueva", methods=["GET", "POST"])
+@requiere_admin
 def fabrica_nueva():
     if request.method == "POST":
         try:
@@ -384,6 +635,7 @@ def fabrica_nueva():
 
 
 @app.route("/fabrica/editar/<int:pizza_id>", methods=["GET", "POST"])
+@requiere_admin
 def fabrica_editar(pizza_id):
     try:
         conn = database.get_local_conn()
@@ -442,6 +694,7 @@ def fabrica_editar(pizza_id):
 
 
 @app.route("/fabrica/eliminar/<int:pizza_id>", methods=["POST"])
+@requiere_admin
 def fabrica_eliminar(pizza_id):
     try:
         conn = database.get_local_conn()
@@ -492,7 +745,7 @@ BORDE_POR_DEFECTO = "CLASICO"
 
 # Flete por entrega a domicilio: porcentaje del subtotal de los productos.
 PORCENTAJE_FLETE = Decimal("0.05")
-CAMPOS_CLIENTE = ("cliente", "correo_cliente", "retiro_o_flete", "direccion")
+CAMPOS_CLIENTE = ("retiro_o_flete", "direccion")
 
 
 def _precio_sodas(producto, cantidad, sodas_cantidad, sodas_tamano):
@@ -606,9 +859,12 @@ def _entrega_permitida(lineas):
 
 
 def _guardar_borrador_cliente():
-    """Conserva los datos del cliente entre «Agregar» / «Quitar» y la confirmación."""
+    """Conserva la información de entrega entre «Agregar» / «Quitar»."""
+    campos = CAMPOS_CLIENTE
+    if session.get("usuario_rol") == "admin":
+        campos += ("cliente", "correo_cliente")
     session["pedido_borrador"] = {
-        campo: request.form.get(campo, "") for campo in CAMPOS_CLIENTE
+        campo: request.form.get(campo, "") for campo in campos
     }
 
 
@@ -616,17 +872,27 @@ def _cargar_pagina_pedidos():
     conn = database.get_local_conn()
     try:
         productos = _cargar_productos(conn)
-        lista_pedidos = conn.execute(
-            "SELECT pedidos.*, COALESCE(pedidos.detalle, pedidos.cantidad || '× ' || pizzas.nombre) "
-            "AS pizza_nombre FROM pedidos JOIN pizzas ON pedidos.pizza_id = pizzas.id "
-            "ORDER BY pedidos.id DESC"
-        ).fetchall()
+        consulta_pedidos = (
+            "SELECT pedidos.*, COALESCE(pedidos.detalle, "
+            "pedidos.cantidad || '× ' || pizzas.nombre) AS pizza_nombre "
+            "FROM pedidos JOIN pizzas ON pedidos.pizza_id = pizzas.id "
+        )
+        if session.get("usuario_rol") == "admin":
+            lista_pedidos = conn.execute(
+                consulta_pedidos + "ORDER BY pedidos.id DESC"
+            ).fetchall()
+        else:
+            lista_pedidos = conn.execute(
+                consulta_pedidos + "WHERE pedidos.usuario_id=? ORDER BY pedidos.id DESC",
+                (session["usuario_id"],),
+            ).fetchall()
     finally:
         conn.close()
     return productos, lista_pedidos
 
 
 @app.route("/pedidos/agregar", methods=["POST"])
+@requiere_usuario
 def pedidos_agregar():
     _guardar_borrador_cliente()
     try:
@@ -651,6 +917,7 @@ def pedidos_agregar():
 
 
 @app.route("/pedidos/quitar/<int:indice>", methods=["POST"])
+@requiere_usuario
 def pedidos_quitar(indice):
     _guardar_borrador_cliente()
     carrito = session.get("carrito", [])
@@ -662,6 +929,7 @@ def pedidos_quitar(indice):
 
 
 @app.route("/pedidos", methods=["GET", "POST"])
+@requiere_usuario
 def pedidos():
     try:
         productos, lista_pedidos = _cargar_pagina_pedidos()
@@ -673,8 +941,14 @@ def pedidos():
     if request.method == "POST":
         _guardar_borrador_cliente()
         try:
-            cliente = request.form.get("cliente", "").strip()
-            correo_cliente = request.form.get("correo_cliente", "").strip()
+            if session.get("usuario_rol") == "admin":
+                cliente = request.form.get("cliente", "").strip()
+                correo_cliente = request.form.get("correo_cliente", "").strip()
+                usuario_id = None
+            else:
+                cliente = session["usuario_nombre"]
+                correo_cliente = session["usuario_correo"]
+                usuario_id = session["usuario_id"]
             retiro_o_flete = request.form.get("retiro_o_flete", "RETIRO EN SITIO")
             direccion = " ".join(request.form.get("direccion", "").split())
 
@@ -691,7 +965,7 @@ def pedidos():
 
             if not cliente or not correo_cliente:
                 raise ValueError("Debe indicar nombre y correo del cliente.")
-            if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", correo_cliente):
+            if not _correo_valido(correo_cliente):
                 raise ValueError("Indique un correo electrónico válido.")
             if retiro_o_flete not in ("RETIRO EN SITIO", "FLETE A DOMICILIO"):
                 raise ValueError("Seleccione un método de entrega válido.")
@@ -732,11 +1006,11 @@ def pedidos():
             tamanos = {l["sodas_tamano"] for l in con_sodas}
 
             ok, pedido_id, error = database.replicate_write(
-                "INSERT INTO pedidos (cliente, correo_cliente, pizza_id, refresco, "
+                "INSERT INTO pedidos (cliente, correo_cliente, usuario_id, pizza_id, refresco, "
                 "refresco_cantidad, refresco_tamano, "
                 "cantidad, subtotal, flete, total, estado, retiro_o_flete, direccion, fecha, "
-                "detalle) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (cliente, correo_cliente, lineas[0]["pizza_id"], refresco,
+                "detalle) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (cliente, correo_cliente, usuario_id, lineas[0]["pizza_id"], refresco,
                  sum(l["sodas_cantidad"] for l in lineas),
                  tamanos.pop() if len(tamanos) == 1 else None,
                  sum(l["cantidad"] for l in lineas), subtotal, flete, total,
@@ -981,6 +1255,7 @@ def _confirmar_cobro(cobro, pedido, referencia):
 
 
 @app.route("/pagos", methods=["GET", "POST"])
+@requiere_admin
 def pagos():
     if request.method == "POST":
         try:
@@ -1052,6 +1327,7 @@ def pagos():
 
 
 @app.route("/pagos/yappy/<codigo>", methods=["GET", "POST"])
+@requiere_admin
 def cobro_yappy(codigo):
     """Pantalla de caja: QR, número Yappy y confirmación del pago."""
     try:
@@ -1087,6 +1363,7 @@ def cobro_yappy(codigo):
 
 
 @app.route("/pagos/yappy/<codigo>/estado")
+@requiere_admin
 def cobro_yappy_estado(codigo):
     """Consulta ligera que usa la pantalla de caja para detectar el pago."""
     try:

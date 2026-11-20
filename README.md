@@ -29,6 +29,8 @@ Abrir **http://127.0.0.1:5000**
 
 - `/` → Menú público, separado en **Combos** (pizza + soda), **Combos de 2 pizzas** y **Pizzas individuales**.
 - Cada botón «Pedir» conserva la pizza elegida y el resumen del pedido actualiza el subtotal en pantalla.
+- `/admin` → Panel privado con acceso a productos, pedidos, pagos y clientes. Los clientes no pueden
+  entrar en estas secciones.
 - `/fabrica` → CRUD de productos (crear, editar, eliminar). Al crear se elige **Combo** (incluye una soda),
   **Combo de 2 pizzas** (dos pizzas individuales diferentes + soda) o **Pizza individual** (sin soda).
   Una pizza que forma parte de un combo de 2 pizzas no se puede eliminar. Cada pizza lleva de 1 a 10 ingredientes; el queso mozzarella es la
@@ -36,9 +38,10 @@ Abrir **http://127.0.0.1:5000**
 - El catálogo inicia con cinco combos, la versión individual de cada uno, tres pizzas individuales más
   (Margarita, Pepperoni, Jamón y Champiñones) y tres combos de 2 pizzas que las combinan. No permite
   eliminar (ni convertir en pizza) un combo si quedarían menos de cinco (cuentan ambos tipos de combo).
-- `/pedidos` → El cliente arma su pedido como un carrito: elige **Combos** o **Pizzas individuales**,
-  la cantidad y sus sodas (cantidad, tamaño y sabores), pulsa «Agregar al pedido» y repite con
-  otros productos; cada línea se puede quitar. Las sodas tienen precio por tamaño (lata $1.00,
+- `/pedidos` → El cliente inicia sesión o crea una cuenta antes de pedir. Su nombre y correo se
+  toman de su cuenta; solo puede consultar sus propios pedidos. El cliente arma su pedido como un
+  carrito: elige **Combos** o **Pizzas individuales**, la cantidad y sus sodas (cantidad, tamaño y sabores),
+  pulsa «Agregar al pedido» y repite con otros productos; cada línea se puede quitar. Las sodas tienen precio por tamaño (lata $1.00,
   botella 20 oz $1.50, 1 litro $2.25, 2 litros $3.00); cada combo incluye una lata, así que con un
   tamaño mayor se paga la diferencia y las sodas extra se cobran completas.
   Cada pizza puede llevar un **borde** (como en Domino's): clásico (incluido), ajo y parmesano
@@ -92,6 +95,19 @@ Sin `SMTP_PASS` no se intenta enviar y queda registrado en `correos_enviados.log
 Para usar otra cuenta o servidor se pueden definir también `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`
 y `EMPRESA_CORREO`, y `FLASK_SECRET_KEY` para conservar el carrito al reiniciar la app.
 Si `FLASK_SECRET_KEY` no está definida, se genera una clave temporal al iniciar la app.
+
+### Cuentas de clientes y administrador
+
+El menú permanece público. Para agregar productos o confirmar un pedido, el cliente debe iniciar
+sesión o registrarse con nombre, correo y una contraseña de al menos 12 caracteres. Las contraseñas
+se guardan como hashes; cada cliente solo ve sus pedidos. No se envía un correo de verificación
+en esta versión.
+
+El primer administrador se crea desde las variables `ADMIN_EMAIL` y `ADMIN_PASSWORD` del archivo
+local `.env` (no las subas a GitHub). La contraseña debe tener al menos 12 caracteres. No existe
+registro público de administradores. Después de crear la cuenta, el administrador puede entrar a
+`/admin` para gestionar productos, pedidos, pagos y consultar clientes. Si la base de datos ya tiene
+un administrador, cambiar esas variables no reemplaza su contraseña.
 
 ## 2. Despliegue en el servidor Linux con NGINX (sucursal Veraguas)
 
