@@ -11,6 +11,7 @@
   <section class="payment-card">
     <p class="eyebrow">Catálogo</p>
     <h2>{{ resumen.productos }} productos</h2>
+    <p class="muted">{{ resumen.stock_bajo }} productos con poco stock ({{ umbral_stock_bajo }} o menos)</p>
     <a class="btn" href="{{ url_for('fabrica') }}">Administrar productos</a>
   </section>
   <section class="payment-card">
@@ -29,5 +30,22 @@
     <h2>Pagos y Yappy</h2>
     <a class="btn" href="{{ url_for('pagos') }}">Administrar pagos</a>
   </section>
+  <section class="payment-card">
+    <p class="eyebrow">Ventas pagadas</p>
+    <h2>${{ "%.2f"|format(resumen.ventas_pagadas) }}</h2>
+    <p class="muted">{{ resumen.pedidos_pagados }} pedidos pagados</p>
+  </section>
 </div>
+
+{% if resumen.productos_bajos %}
+<section class="low-stock-panel">
+  <h2>Reponer pronto</h2>
+  <ul>
+    {% for p in resumen.productos_bajos %}
+      <li><span>{{ p.nombre }}</span><strong>{{ p.stock }} disponibles</strong>
+        <a href="{{ url_for('fabrica_editar', pizza_id=p.id) }}">Actualizar</a></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
 {% endblock %}

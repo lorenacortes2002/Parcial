@@ -28,9 +28,14 @@ python app.py
 Abrir **http://127.0.0.1:5000**
 
 - `/` → Menú público, separado en **Combos** (pizza + soda), **Combos de 2 pizzas** y **Pizzas individuales**.
+- El menú permite buscar por sabor o ingrediente, filtrar por tipo y muestra el inventario real.
+  Los productos comienzan con 100 unidades, descontadas al crear el pedido; los pedidos no pagados
+  también reservan stock. El administrador puede ajustar existencias desde Productos.
+- Cada producto puede tener una foto JPG, PNG o WebP cargada desde Productos (máximo 5 MB);
+  si no tiene foto, se muestra la ilustración del menú.
 - Cada botón «Pedir» conserva la pizza elegida y el resumen del pedido actualiza el subtotal en pantalla.
 - `/admin` → Panel privado con acceso a productos, pedidos, pagos y clientes. Los clientes no pueden
-  entrar en estas secciones.
+  entrar en estas secciones. Muestra ventas pagadas y productos con 10 unidades o menos.
 - `/fabrica` → CRUD de productos (crear, editar, eliminar). Al crear se elige **Combo** (incluye una soda),
   **Combo de 2 pizzas** (dos pizzas individuales diferentes + soda) o **Pizza individual** (sin soda).
   Una pizza que forma parte de un combo de 2 pizzas no se puede eliminar. Cada pizza lleva de 1 a 10 ingredientes; el queso mozzarella es la
@@ -99,17 +104,22 @@ Si `FLASK_SECRET_KEY` no está definida, se genera una clave temporal al iniciar
 ### Cuentas de clientes y administrador
 
 El menú permanece público. Para agregar productos o confirmar un pedido, el cliente debe iniciar
-sesión o registrarse con nombre, correo y una contraseña de al menos 12 caracteres. Las contraseñas
+sesión o registrarse con nombre, correo y una contraseña de al menos 5 caracteres. Las contraseñas
 se guardan como hashes; cada cliente solo ve sus pedidos. No se envía un correo de verificación
 en esta versión. Los clientes y administradores pueden cambiar su contraseña desde la opción
 **Contraseña** de su sesión.
+Tras cinco intentos fallidos desde el mismo equipo y para la misma cuenta, el acceso se bloquea
+durante 15 minutos. El mínimo de 5 caracteres es para este prototipo; para producción conviene usar
+contraseñas más largas.
 
 El primer administrador se crea desde las variables `ADMIN_EMAIL` y `ADMIN_PASSWORD` del archivo
-local `.env` (no las subas a GitHub). La contraseña debe tener al menos 12 caracteres. No existe
+local `.env` (no las subas a GitHub). La contraseña debe tener al menos 5 caracteres. No existe
 registro público de administradores. Después de crear la cuenta, el administrador puede entrar a
 `/admin/login` (acceso directo, no visible en el menú público) para gestionar productos, pedidos,
 pagos y consultar clientes. El inicio de sesión reconoce el rol y redirige al panel apropiado.
 Si la base de datos ya tiene un administrador, cambiar esas variables no reemplaza su contraseña.
+Al servir el sitio exclusivamente por HTTPS, configura `SESSION_COOKIE_SECURE=true` y define una
+`FLASK_SECRET_KEY` larga y privada en el entorno.
 
 ## 2. Despliegue en el servidor Linux con NGINX (sucursal Veraguas)
 

@@ -8,6 +8,7 @@ if (orderForm) {
   const categoryRadios = [...document.querySelectorAll('input[name="categoria"]')];
   const productChoices = [...document.querySelectorAll(".product-choice")];
   const quantityInput = document.querySelector("#cantidad");
+  const stockAvailability = document.querySelector("#stock-availability");
 
   const category = () => categoryRadios.find((r) => r.checked)?.value ?? "COMBO";
   const activeSelect = () =>
@@ -15,6 +16,20 @@ if (orderForm) {
   const selectedProduct = () => activeSelect()?.selectedOptions[0];
   const isCombo = () => (selectedProduct()?.dataset.tipo ?? "PIZZA") !== "PIZZA";
   const quantity = () => Math.max(1, Number.parseInt(quantityInput.value, 10) || 1);
+  const updateStockAvailability = () => {
+    const available = Number.parseInt(selectedProduct()?.dataset.stock ?? "0", 10);
+    const maximum = Math.min(Number(quantityInput.dataset.max ?? quantityInput.max), available);
+    quantityInput.max = String(maximum);
+    quantityInput.setCustomValidity(
+      available < 1 ? "Este producto está agotado."
+        : quantity() > available ? `Solo quedan ${available} unidades disponibles.` : ""
+    );
+    if (stockAvailability) {
+      stockAvailability.textContent = available > 0
+        ? `${available} unidades disponibles`
+        : "Producto agotado";
+    }
+  };
 
   // Solo se envía el selector de la categoría elegida.
   const applyCategory = () => {
@@ -215,6 +230,7 @@ if (orderForm) {
   // --- Eventos ------------------------------------------------------------
   const refreshAll = () => {
     applyCategory();
+    updateStockAvailability();
     defaultSodaQty();
     suggestComboFlavor();
     updateSodas();
@@ -235,6 +251,7 @@ if (orderForm) {
   );
   crustRadios.forEach((radio) => radio.addEventListener("change", updatePreview));
   quantityInput.addEventListener("input", () => {
+    updateStockAvailability();
     defaultSodaQty();
     distribute();
     updateSodas();

@@ -33,11 +33,32 @@
   <a href="#pizzas">Pizzas individuales</a>
 </nav>
 
+<div class="menu-controls" role="search">
+  <label for="menu-search">Buscar por sabor o ingrediente</label>
+  <input id="menu-search" type="search" placeholder="Ej. pepperoni, jamón..."
+    autocomplete="off" aria-controls="menu-catalog">
+  <label for="menu-category">Tipo de producto</label>
+  <select id="menu-category" aria-controls="menu-catalog">
+    <option value="TODOS">Todos</option>
+    <option value="COMBO">Combos de una pizza</option>
+    <option value="DUO">Combos de dos pizzas</option>
+    <option value="PIZZA">Pizzas individuales</option>
+  </select>
+  <p id="menu-result-count" aria-live="polite">{{ productos|length }} productos</p>
+</div>
+
+<div id="menu-catalog">
 {% macro menu_card(p, art) %}
-  <article class="card">
-    <div class="pizza-art pizza-art--{{ art }}" aria-hidden="true">
-      {% with pizza_variant=art %}{% include "_pizza_illustration.html" %}{% endwith %}
-    </div>
+  <article class="card" data-menu-item data-category="{{ p.tipo }}"
+    data-search="{{ p.texto_busqueda }}">
+    {% if p.imagen %}
+      <img class="product-photo" src="{{ url_for('static', filename=p.imagen) }}"
+        alt="{{ p.nombre }}" loading="lazy">
+    {% else %}
+      <div class="pizza-art pizza-art--{{ art }}" aria-hidden="true">
+        {% with pizza_variant=art %}{% include "_pizza_illustration.html" %}{% endwith %}
+      </div>
+    {% endif %}
     <div class="card-body">
       <h3>{{ p.nombre }}</h3>
       {% if p.tipo == 'DUO' %}
@@ -55,9 +76,16 @@
         <p class="drink">🍕 Pizza individual</p>
       {% endif %}
       <p class="delivery-note">{{ entregas_pizza[p.entrega] }}</p>
+      <p class="stock-note {% if p.stock == 0 %}stock-empty{% elif p.stock <= umbral_stock_bajo %}stock-low{% endif %}">
+        {% if p.stock == 0 %}Agotado{% else %}{{ p.stock }} disponibles{% endif %}
+      </p>
       <div class="card-bottom">
         <span class="precio">${{ "%.2f"|format(p.precio) }}</span>
-        <a class="btn" href="{{ url_for('pedidos', pizza_id=p.id) }}">Pedir</a>
+        {% if p.stock > 0 %}
+          <a class="btn" href="{{ url_for('pedidos', pizza_id=p.id) }}">Pedir</a>
+        {% else %}
+          <span class="btn btn-disabled" aria-disabled="true">Agotado</span>
+        {% endif %}
       </div>
     </div>
   </article>
@@ -108,4 +136,9 @@
     {% endfor %}
   </div>
 </section>
+<p id="menu-no-results" class="empty-state" hidden>No encontramos productos con esos filtros.</p>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='menu-filter.js') }}" defer></script>
 {% endblock %}

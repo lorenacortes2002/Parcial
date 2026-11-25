@@ -24,7 +24,7 @@
 <div class="table-wrap">
 <table class="tabla">
   <thead>
-    <tr><th>#</th><th>Tipo</th><th>Nombre</th><th>Contenido</th><th>Soda</th><th>Entrega</th><th>Precio</th><th>Acciones</th></tr>
+    <tr><th>#</th><th>Tipo</th><th>Nombre</th><th>Contenido</th><th>Soda</th><th>Entrega</th><th>Precio</th><th>Stock</th><th>Acciones</th></tr>
   </thead>
   <tbody>
     {% for p in pizzas %}
@@ -42,6 +42,7 @@
       <td>{{ p.refresco if p.tipo != 'PIZZA' else '—' }}</td>
       <td><span class="estado entrega-badge">{{ entregas_pizza[p.entrega] }}</span></td>
       <td>${{ "%.2f"|format(p.precio) }}</td>
+      <td><span class="estado {{ 'stock-empty' if p.stock == 0 else 'stock-low' if p.stock <= umbral_stock_bajo else 'stock-ok' }}">{{ p.stock }}</span></td>
       <td class="acciones">
         <a href="{{ url_for('fabrica_editar', pizza_id=p.id) }}">Editar</a>
         <form method="POST" action="{{ url_for('fabrica_eliminar', pizza_id=p.id) }}"
@@ -51,7 +52,7 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="8">Todavía no hay pizzas registradas. Crea la primera para completar el menú.</td></tr>
+    <tr><td colspan="9">Todavía no hay pizzas registradas. Crea la primera para completar el menú.</td></tr>
     {% endfor %}
   </tbody>
 </table>

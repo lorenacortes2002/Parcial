@@ -31,6 +31,7 @@ DB_REPLICA_PATH = os.path.join(BASE_DIR, "db_replica.sqlite3")
 
 # Tablas que se replican, en orden de dependencias (las referenciadas primero).
 TABLAS_REPLICADAS = ("pizzas", "pedidos", "pedido_items", "pagos", "cobros_yappy")
+STOCK_INICIAL = 100
 TIMEOUT_REPLICA = 5  # segundos de espera máxima a la máquina virtual
 
 
@@ -78,8 +79,17 @@ CREATE TABLE IF NOT EXISTS pizzas (
     entrega TEXT NOT NULL DEFAULT 'AMBOS',  -- AMBOS / RETIRO EN SITIO / FLETE A DOMICILIO
     tipo TEXT NOT NULL DEFAULT 'COMBO',     -- COMBO / DUO (2 pizzas + soda) / PIZZA (individual)
     pizza1_id INTEGER REFERENCES pizzas(id),  -- solo DUO: las dos pizzas individuales
-    pizza2_id INTEGER REFERENCES pizzas(id)
+    pizza2_id INTEGER REFERENCES pizzas(id),
+    stock INTEGER NOT NULL DEFAULT 100 CHECK (stock >= 0),
+    imagen TEXT
 );
+
+CREATE TABLE IF NOT EXISTS intentos_login (
+    actor_hash TEXT NOT NULL,
+    fecha TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_intentos_login_actor_fecha
+    ON intentos_login(actor_hash, fecha);
 
 CREATE TABLE IF NOT EXISTS pedidos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -185,6 +195,10 @@ def _migrate(conn):
             conn.execute(
                 f"ALTER TABLE pizzas ADD COLUMN {columna} INTEGER REFERENCES pizzas(id)"
             )
+    if "stock" not in columnas:
+        conn.execute(f"ALTER TABLE pizzas ADD COLUMN stock INTEGER NOT NULL DEFAULT {STOCK_INICIAL}")
+    if "imagen" not in columnas:
+        conn.execute("ALTER TABLE pizzas ADD COLUMN imagen TEXT")
     try:
         # Un pedido solo puede tener un pago: evita cobros dobles simultáneos.
         conn.execute(
@@ -315,8 +329,8 @@ def init_db():
                     replica_conn.execute(
                         """
                         INSERT INTO pizzas (id, nombre, ingredientes, refresco, precio, entrega, tipo,
-                                            pizza1_id, pizza2_id)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                            pizza1_id, pizza2_id, stock, imagen)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(id) DO UPDATE SET
                             nombre=excluded.nombre,
                             ingredientes=excluded.ingredientes,
@@ -325,12 +339,15 @@ def init_db():
                             entrega=excluded.entrega,
                             tipo=excluded.tipo,
                             pizza1_id=excluded.pizza1_id,
-                            pizza2_id=excluded.pizza2_id
+                            pizza2_id=excluded.pizza2_id,
+                            stock=excluded.stock,
+                            imagen=excluded.imagen
                         """,
                         (
                             pizza["id"], pizza["nombre"], pizza["ingredientes"],
                             pizza["refresco"], pizza["precio"], pizza["entrega"],
                             pizza["tipo"], pizza["pizza1_id"], pizza["pizza2_id"],
+                            pizza["stock"], pizza["imagen"],
                         ),
                     )
         finally:
@@ -340,16 +357,18 @@ def init_db():
         raise
 
 
-def replicate_transaction(operations):
+def replicate_transaction(operations, required_changes=None):
     """Aplica un grupo de escrituras en ambas bases; conserva IDs al replicar inserts."""
     local_conn = None
     local_ids = []
     try:
         local_conn = get_local_conn()
         with local_conn:
-            for sql, params in operations:
+            for operation_index, (sql, params) in enumerate(operations):
                 cur = local_conn.execute(sql, params)
                 local_ids.append(cur.lastrowid)
+                if required_changes and operation_index in required_changes and cur.rowcount != 1:
+                    raise sqlite3.IntegrityError(required_changes[operation_index])
     except sqlite3.Error as e:
         if local_conn is not None:
             local_conn.rollback()
@@ -360,7 +379,9 @@ def replicate_transaction(operations):
             local_conn.close()
 
     try:
-        _aplicar_en_replica(_operaciones_para_replica(operations, local_ids))
+        _aplicar_en_replica(
+            _operaciones_para_replica(operations, local_ids), required_changes
+        )
     except (sqlite3.Error, ErrorReplica) as e:
         print(f"[ERROR DB REPLICA] {e}")
         return True, local_ids, f"Guardado local OK, pero falló la réplica: {e}"
@@ -408,7 +429,7 @@ def _operaciones_para_replica(operations, local_ids):
     return resultado
 
 
-def _aplicar_en_replica(operaciones):
+def _aplicar_en_replica(operaciones, required_changes=None):
     """
     Aplica las operaciones en la réplica. Con una o más máquinas virtuales
     configuradas, se envía a todas; si alguna falla, se informa nombrándola
@@ -419,6 +440,10 @@ def _aplicar_en_replica(operaciones):
         cuerpo = {
             "operaciones": [{"sql": sql, "params": list(params)} for sql, params in operaciones]
         }
+        if required_changes:
+            cuerpo["required_changes"] = {
+                str(index): message for index, message in required_changes.items()
+            }
         errores = []
         for url in destinos:
             try:
@@ -432,8 +457,13 @@ def _aplicar_en_replica(operaciones):
     try:
         replica_conn = get_replica_conn()
         with replica_conn:
-            for sql, params in operaciones:
-                replica_conn.execute(sql, params)
+            for operation_index, (sql, params) in enumerate(operaciones):
+                cur = replica_conn.execute(sql, params)
+                if (
+                    required_changes and operation_index in required_changes
+                    and cur.rowcount != 1
+                ):
+                    raise sqlite3.IntegrityError(required_changes[operation_index])
     finally:
         if replica_conn is not None:
             replica_conn.close()
@@ -468,7 +498,7 @@ _SQL_REPLICABLE = re.compile(
 )
 
 
-def aplicar_operaciones_recibidas(operaciones):
+def aplicar_operaciones_recibidas(operaciones, required_changes=None):
     """
     (En la máquina virtual) Aplica en su base las escrituras recibidas de la PC.
     Solo acepta INSERT/UPDATE/DELETE de una sentencia sobre las tablas de la app.
@@ -488,11 +518,29 @@ def aplicar_operaciones_recibidas(operaciones):
             raise ValueError("Parámetros no válidos en la réplica.")
         validadas.append((sql, params))
 
+    cambios_requeridos = {}
+    if required_changes is not None:
+        if not isinstance(required_changes, dict):
+            raise ValueError("Validaciones de cambios no válidas.")
+        for indice, mensaje in required_changes.items():
+            try:
+                indice = int(indice)
+            except (TypeError, ValueError):
+                raise ValueError("Índice de validación no válido.")
+            if (
+                not 0 <= indice < len(validadas)
+                or not isinstance(mensaje, str) or not mensaje or len(mensaje) > 256
+            ):
+                raise ValueError("Validación de cambios no válida.")
+            cambios_requeridos[indice] = mensaje
+
     conn = get_local_conn()
     try:
         with conn:
-            for sql, params in validadas:
-                conn.execute(sql, params)
+            for operation_index, (sql, params) in enumerate(validadas):
+                cur = conn.execute(sql, params)
+                if operation_index in cambios_requeridos and cur.rowcount != 1:
+                    raise ValueError(cambios_requeridos[operation_index])
     finally:
         conn.close()
 

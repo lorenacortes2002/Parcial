@@ -1,3 +1,5 @@
+import base64
+import io
 import json
 import re
 import sqlite3
@@ -83,6 +85,10 @@ class ProjectRequirementsTests(unittest.TestCase):
         for path in (self.local_path, self.replica_path):
             rows = self._rows(path, "SELECT id, nombre FROM pizzas ORDER BY id")
             self.assertGreaterEqual(len(rows), 5)
+            self.assertTrue(all(
+                stock == database.STOCK_INICIAL
+                for (stock,) in self._rows(path, "SELECT stock FROM pizzas")
+            ))
         self.assertEqual(
             self._rows(self.local_path, "SELECT id, nombre FROM pizzas ORDER BY id"),
             self._rows(self.replica_path, "SELECT id, nombre FROM pizzas ORDER BY id"),
@@ -528,6 +534,8 @@ class ProjectRequirementsTests(unittest.TestCase):
         menu = self.client.get("/").get_data(as_text=True)
         self.assertIn("Combos", menu)
         self.assertIn("Pizzas individuales", menu)
+        product_count = self._rows(self.local_path, "SELECT COUNT(*) FROM pizzas")[0][0]
+        self.assertEqual(menu.count("100 disponibles"), product_count)
         pizzas_section = menu.index('<section class="menu-section" id="pizzas"')
         self.assertLess(menu.index("Hawaiana"), pizzas_section)
         self.assertGreater(menu.index("<h3>Solo Pepperoni</h3>"), pizzas_section)
@@ -650,6 +658,119 @@ class ProjectRequirementsTests(unittest.TestCase):
             # 1 lata incluida en el combo + 1 lata extra ($1.00).
             [("2× Agua (Lata 12 oz)", 13.0)],
         )
+
+    def test_inventory_decreases_on_order_and_prevents_overselling(self):
+        edited = self.client.post("/fabrica/editar/1", data={
+            "tipo": "COMBO",
+            "nombre": "Pepperoni Clásica",
+            "ingredientes": ["pepperoni"],
+            "refresco": "Coca-Cola",
+            "precio": "7.50",
+            "entrega": "AMBOS",
+            "stock": "2",
+        })
+        self.assertEqual(edited.status_code, 302)
+        for path in (self.local_path, self.replica_path):
+            self.assertEqual(
+                self._rows(path, "SELECT stock FROM pizzas WHERE id=1"),
+                [(2,)],
+            )
+
+        rejected = self.client.post("/pedidos", data={
+            "pizza_id": "1",
+            "cantidad": "3",
+            "refresco_cantidad": "0",
+            "retiro_o_flete": "RETIRO EN SITIO",
+        }, follow_redirects=True)
+        self.assertIn("Solo quedan 2 unidades".encode(), rejected.data)
+        self.assertEqual(self._rows(self.local_path, "SELECT COUNT(*) FROM pedidos"), [(0,)])
+
+        self.client.post("/pedidos", data={
+            "cliente": "Cliente",
+            "correo_cliente": "cliente@example.test",
+            "pizza_id": "1",
+            "cantidad": "2",
+            "refresco_cantidad": "0",
+            "retiro_o_flete": "RETIRO EN SITIO",
+        })
+        for path in (self.local_path, self.replica_path):
+            self.assertEqual(
+                self._rows(path, "SELECT stock FROM pizzas WHERE id=1"),
+                [(0,)],
+            )
+        self.assertIn("Agotado", self.client.get("/").get_data(as_text=True))
+
+    def test_admin_dashboard_reports_low_stock_and_paid_sales(self):
+        self.client.post("/fabrica/editar/2", data={
+            "tipo": "COMBO",
+            "nombre": "Hawaiana",
+            "ingredientes": ["jamón", "piña", "salsa de tomate"],
+            "refresco": "Sprite",
+            "precio": "7.75",
+            "entrega": "AMBOS",
+            "stock": "8",
+        })
+        self.client.post("/pedidos", data={
+            "cliente": "Cliente",
+            "correo_cliente": "cliente@example.test",
+            "pizza_id": "2",
+            "cantidad": "1",
+            "refresco_cantidad": "0",
+            "retiro_o_flete": "RETIRO EN SITIO",
+        })
+        pedido_id = self._rows(self.local_path, "SELECT id FROM pedidos")[0][0]
+        charge = self.client.post("/pagos", data={"pedido_id": str(pedido_id)})
+        codigo = charge.headers["Location"].rsplit("/", 1)[-1]
+        self.client.post(
+            f"/pagos/yappy/{codigo}",
+            data={"referencia": "ab12cd34"},
+        )
+
+        dashboard = self.client.get("/admin").get_data(as_text=True)
+        self.assertIn("7 disponibles", dashboard)
+        self.assertIn("$7.75", dashboard)
+        self.assertIn("1 pedidos pagados", dashboard)
+
+    def test_admin_can_upload_product_photo(self):
+        png = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZsAAAAASUVORK5CYII="
+        )
+        response = self.client.post("/fabrica/nueva", data={
+            "tipo": "PIZZA",
+            "nombre": "Pizza con foto",
+            "ingredientes": ["pepperoni"],
+            "precio": "6.00",
+            "entrega": "AMBOS",
+            "stock": "3",
+            "imagen": (io.BytesIO(png), "pizza.png"),
+        })
+        self.assertEqual(response.status_code, 302)
+        imagen, stock = self._rows(
+            self.local_path,
+            "SELECT imagen, stock FROM pizzas WHERE nombre='Pizza con foto'",
+        )[0]
+        self.assertEqual(stock, 3)
+        ruta = Path(webapp.app.static_folder, imagen)
+        self.assertTrue(ruta.is_file())
+        self.addCleanup(lambda: ruta.unlink(missing_ok=True))
+        menu = self.client.get("/").get_data(as_text=True)
+        self.assertIn(f'src="/static/{imagen}"'.replace("&", "&amp;"), menu)
+
+    def test_login_blocks_repeated_failed_attempts(self):
+        guest = webapp.app.test_client()
+        for _ in range(5):
+            response = guest.post("/cuenta/login", data={
+                "correo": "admin@example.test",
+                "password": "incorrecta",
+            })
+            self.assertEqual(response.status_code, 200)
+
+        blocked = guest.post("/cuenta/login", data={
+            "correo": "admin@example.test",
+            "password": "test-staff-password",
+        })
+        self.assertEqual(blocked.status_code, 429)
+        self.assertIn("Demasiados intentos fallidos".encode(), blocked.data)
 
     def test_cart_with_several_combos_and_pizzas(self):
         ids = {
@@ -1170,6 +1291,55 @@ class ProjectRequirementsTests(unittest.TestCase):
         })
         self.assertEqual(new_password.status_code, 302)
         self.assertEqual(new_password.headers["Location"], "/admin")
+
+    def test_password_minimum_is_five_characters(self):
+        guest = webapp.app.test_client()
+        too_short = guest.post("/cuenta/registro", data={
+            "nombre": "Cliente nuevo",
+            "correo": "cliente-corto@example.test",
+            "password": "1234",
+            "confirmacion": "1234",
+        })
+        self.assertIn(b"al menos 5 caracteres", too_short.data)
+        accepted = guest.post("/cuenta/registro", data={
+            "nombre": "Cliente nuevo",
+            "correo": "cliente-corto@example.test",
+            "password": "12345",
+            "confirmacion": "12345",
+        })
+        self.assertEqual(accepted.status_code, 302)
+
+        rejected_change = self.client.post("/cuenta/seguridad", data={
+            "actual": "test-staff-password",
+            "nueva": "1234",
+            "confirmacion": "1234",
+        })
+        self.assertIn(b"al menos 5 caracteres", rejected_change.data)
+        accepted_change = self.client.post("/cuenta/seguridad", data={
+            "actual": "test-staff-password",
+            "nueva": "12345",
+            "confirmacion": "12345",
+        })
+        self.assertEqual(accepted_change.status_code, 302)
+
+        conn = database.get_local_conn()
+        try:
+            conn.execute("DELETE FROM usuarios WHERE rol='admin'")
+            conn.commit()
+        finally:
+            conn.close()
+        bootstrap_client = webapp.app.test_client()
+        webapp.app.config["ADMIN_PASSWORD"] = "1234"
+        rejected_admin = bootstrap_client.get("/cuenta/login")
+        self.assertIn(b"al menos 5 caracteres", rejected_admin.data)
+
+        webapp.app.config["ADMIN_PASSWORD"] = "12345"
+        bootstrap_client.get("/cuenta/login")
+        admin = self._rows(
+            self.local_path,
+            "SELECT password_hash FROM usuarios WHERE rol='admin'",
+        )[0][0]
+        self.assertTrue(webapp.check_password_hash(admin, "12345"))
 
     def test_admin_is_created_from_environment_config(self):
         admin = self._rows(

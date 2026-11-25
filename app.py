@@ -13,13 +13,14 @@ Para producción (servidor Linux con NGINX) ver README.md
 -------------------------------------------------
 """
 
+import hashlib
 import math
 import os
 import re
 import secrets
 import socket
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from functools import wraps
 from urllib.parse import urlsplit
@@ -40,6 +41,10 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE", "").lower() in {
+    "1", "true", "yes",
+}
+app.config["MAX_CONTENT_LENGTH"] = 6 * 1024 * 1024
 app.config["ADMIN_EMAIL"] = os.environ.get("ADMIN_EMAIL", "").strip().lower()
 app.config["ADMIN_PASSWORD"] = os.environ.get("ADMIN_PASSWORD", "")
 
@@ -76,6 +81,11 @@ def _correo_valido(correo):
     return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", correo))
 
 
+def _login_actor_hash(correo):
+    actor = f"{request.remote_addr or 'unknown'}:{correo}"
+    return hashlib.sha256(actor.encode("utf-8")).hexdigest()
+
+
 def _bootstrap_admin():
     correo = app.config["ADMIN_EMAIL"]
     password = app.config["ADMIN_PASSWORD"]
@@ -89,8 +99,8 @@ def _bootstrap_admin():
             raise ValueError("Configura ADMIN_EMAIL y ADMIN_PASSWORD en el archivo .env.")
         if not _correo_valido(correo):
             raise ValueError("ADMIN_EMAIL no es un correo válido.")
-        if len(password) < 12:
-            raise ValueError("ADMIN_PASSWORD debe tener al menos 12 caracteres.")
+        if len(password) < 5:
+            raise ValueError("ADMIN_PASSWORD debe tener al menos 5 caracteres.")
         if conn.execute("SELECT 1 FROM usuarios WHERE correo=?", (correo,)).fetchone():
             raise ValueError("ADMIN_EMAIL ya está registrado como cliente.")
 
@@ -164,8 +174,8 @@ def cuenta_registro():
                 raise ValueError("El nombre debe tener entre 2 y 80 caracteres.")
             if not _correo_valido(correo):
                 raise ValueError("Indica un correo electrónico válido.")
-            if len(password) < 12:
-                raise ValueError("La contraseña debe tener al menos 12 caracteres.")
+            if len(password) < 5:
+                raise ValueError("La contraseña debe tener al menos 5 caracteres.")
             if password != confirmacion:
                 raise ValueError("Las contraseñas no coinciden.")
 
@@ -219,15 +229,44 @@ def cuenta_login():
     if request.method == "POST":
         correo = request.form.get("correo", "").strip().lower()
         password = request.form.get("password", "")
+        actor_hash = _login_actor_hash(correo)
         conn = database.get_local_conn()
         try:
+            ahora = datetime.now()
+            cutoff = (ahora - timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S")
+            antiguo = (ahora - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+            conn.execute("DELETE FROM intentos_login WHERE fecha < ?", (antiguo,))
+            intentos = conn.execute(
+                "SELECT COUNT(*) FROM intentos_login WHERE actor_hash=? AND fecha>=?",
+                (actor_hash, cutoff),
+            ).fetchone()[0]
+            if intentos >= 5:
+                flash("Demasiados intentos fallidos. Espera 15 minutos e inténtalo de nuevo.", "danger")
+                return render_template(
+                    "cuenta_login.html", correo=correo, siguiente=siguiente,
+                    admin_configurado=admin_configurado,
+                    es_acceso_admin=siguiente.startswith("/admin"),
+                ), 429
             usuario = conn.execute(
                 "SELECT id, nombre, correo, password_hash, rol FROM usuarios WHERE correo=?",
                 (correo,),
             ).fetchone()
+            if usuario and check_password_hash(usuario["password_hash"], password):
+                conn.execute("DELETE FROM intentos_login WHERE actor_hash=?", (actor_hash,))
+                conn.commit()
+            else:
+                conn.execute(
+                    "INSERT INTO intentos_login (actor_hash, fecha) VALUES (?, ?)",
+                    (actor_hash, ahora.strftime("%Y-%m-%d %H:%M:%S")),
+                )
+                conn.commit()
         except sqlite3.Error as e:
             flash(f"No se pudo consultar la cuenta: {e}", "danger")
-            usuario = None
+            return render_template(
+                "cuenta_login.html", correo=correo, siguiente=siguiente,
+                admin_configurado=admin_configurado,
+                es_acceso_admin=siguiente.startswith("/admin"),
+            ), 503
         finally:
             conn.close()
         if usuario and check_password_hash(usuario["password_hash"], password):
@@ -263,8 +302,8 @@ def cuenta_seguridad():
             confirmacion = request.form.get("confirmacion", "")
             if not check_password_hash(usuario["password_hash"], actual):
                 flash("La contraseña actual es incorrecta.", "danger")
-            elif len(nueva) < 12:
-                flash("La nueva contraseña debe tener al menos 12 caracteres.", "danger")
+            elif len(nueva) < 5:
+                flash("La nueva contraseña debe tener al menos 5 caracteres.", "danger")
             elif nueva != confirmacion:
                 flash("Las contraseñas nuevas no coinciden.", "danger")
             else:
@@ -312,6 +351,14 @@ def personal_logout():
 def admin_dashboard():
     conn = database.get_local_conn()
     try:
+        productos_bajos = conn.execute(
+            "SELECT id, nombre, stock FROM pizzas WHERE stock<=? ORDER BY stock, nombre",
+            (UMBRAL_STOCK_BAJO,),
+        ).fetchall()
+        ventas = conn.execute(
+            "SELECT COUNT(*), COALESCE(SUM(total), 0) FROM pedidos "
+            "WHERE estado IN ('PAGADO', 'PAGADO - DESPACHAR (FLETE)')"
+        ).fetchone()
         resumen = {
             "clientes": conn.execute(
                 "SELECT COUNT(*) FROM usuarios WHERE rol='cliente'"
@@ -322,13 +369,23 @@ def admin_dashboard():
                 "('PAGADO', 'PAGADO - DESPACHAR (FLETE)')"
             ).fetchone()[0],
             "productos": conn.execute("SELECT COUNT(*) FROM pizzas").fetchone()[0],
+            "stock_bajo": len(productos_bajos),
+            "productos_bajos": productos_bajos,
+            "pedidos_pagados": ventas[0],
+            "ventas_pagadas": ventas[1],
         }
     except sqlite3.Error as e:
         flash(f"No se pudo cargar el resumen administrativo: {e}", "danger")
-        resumen = {"clientes": 0, "pedidos": 0, "pendientes": 0, "productos": 0}
+        resumen = {
+            "clientes": 0, "pedidos": 0, "pendientes": 0, "productos": 0,
+            "stock_bajo": 0, "productos_bajos": [], "pedidos_pagados": 0,
+            "ventas_pagadas": 0,
+        }
     finally:
         conn.close()
-    return render_template("admin.html", resumen=resumen)
+    return render_template(
+        "admin.html", resumen=resumen, umbral_stock_bajo=UMBRAL_STOCK_BAJO
+    )
 
 
 @app.route("/admin/clientes")
@@ -445,6 +502,10 @@ TIPOS_PRODUCTO = {
 }
 TIPOS_COMBO = ("COMBO", "DUO")
 MIN_COMBOS = 5
+UMBRAL_STOCK_BAJO = 10
+MAX_STOCK_ITEM = 100_000
+MAX_IMAGEN_PRODUCTO_BYTES = 5 * 1024 * 1024
+EXTENSIONES_IMAGEN = {".jpg", ".jpeg", ".png", ".webp"}
 
 # Formas de entrega que admite cada pizza (valor guardado -> texto visible).
 ENTREGAS_PIZZA = {
@@ -469,13 +530,19 @@ def _cargar_productos(conn):
     return productos
 
 
-def _pizza_fields_from_form():
+def _pizza_fields_from_form(stock_default=database.STOCK_INICIAL):
     tipo = request.form.get("tipo", "COMBO")
     nombre = request.form.get("nombre", "").strip()
     ingredientes = request.form.getlist("ingredientes")
     refresco = request.form.get("refresco", "")
     precio = float(request.form.get("precio", "0"))
     entrega = request.form.get("entrega", "AMBOS")
+    try:
+        stock = int(request.form.get("stock", stock_default))
+    except (TypeError, ValueError):
+        raise ValueError("El inventario debe ser un número entero.")
+    if not 0 <= stock <= MAX_STOCK_ITEM:
+        raise ValueError(f"El inventario debe estar entre 0 y {MAX_STOCK_ITEM} unidades.")
     pizza1_id = pizza2_id = None
 
     if tipo not in TIPOS_PRODUCTO:
@@ -527,8 +594,60 @@ def _pizza_fields_from_form():
     return {
         "tipo": tipo, "nombre": nombre, "ingredientes": ",".join(ingredientes),
         "refresco": refresco, "precio": precio, "entrega": entrega,
-        "pizza1_id": pizza1_id, "pizza2_id": pizza2_id,
+        "pizza1_id": pizza1_id, "pizza2_id": pizza2_id, "stock": stock,
     }
+
+
+def _guardar_imagen_producto(imagen_actual=None):
+    archivo = request.files.get("imagen")
+    if archivo and archivo.filename:
+        extension = os.path.splitext(archivo.filename)[1].lower()
+        contenido = archivo.read(MAX_IMAGEN_PRODUCTO_BYTES + 1)
+        if len(contenido) > MAX_IMAGEN_PRODUCTO_BYTES:
+            raise ValueError("La foto no puede superar 5 MB.")
+        if extension not in EXTENSIONES_IMAGEN:
+            raise ValueError("Usa una foto JPG, PNG o WebP.")
+        valido = (
+            (extension in (".jpg", ".jpeg") and contenido.startswith(b"\xff\xd8\xff"))
+            or (extension == ".png" and contenido.startswith(b"\x89PNG\r\n\x1a\n"))
+            or (
+                extension == ".webp" and len(contenido) >= 12
+                and contenido[:4] == b"RIFF" and contenido[8:12] == b"WEBP"
+            )
+        )
+        if not valido:
+            raise ValueError("El archivo no parece ser una imagen JPG, PNG o WebP válida.")
+        nombre = f"{secrets.token_hex(16)}{extension}"
+        carpeta = os.path.join(app.static_folder, "productos")
+        ruta = os.path.join(carpeta, nombre)
+        try:
+            os.makedirs(carpeta, exist_ok=True)
+            with open(ruta, "xb") as imagen_guardada:
+                imagen_guardada.write(contenido)
+        except OSError as error:
+            try:
+                os.remove(ruta)
+            except OSError:
+                pass
+            raise ValueError(f"No se pudo guardar la foto del producto: {error}") from error
+        return f"productos/{nombre}", ruta
+    if request.form.get("quitar_imagen") == "1":
+        return None, None
+    return imagen_actual, None
+
+
+def _eliminar_imagen_producto(imagen):
+    if not imagen or not re.fullmatch(
+        r"productos/[a-f0-9]{32}\.(?:jpg|jpeg|png|webp)", imagen
+    ):
+        return
+    ruta = os.path.join(app.static_folder, imagen)
+    try:
+        os.remove(ruta)
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        app.logger.warning("No se pudo eliminar la foto %s: %s", imagen, error)
 
 
 def _contar_combos(excluir_id=None):
@@ -573,6 +692,7 @@ def _fabrica_form_context(pizza, tipo_actual, entrega_actual, ingredientes_actua
         ingredientes_actuales=ingredientes_actuales,
         pizzas_individuales=individuales,
         min_ing=MIN_INGREDIENTES, max_ing=MAX_INGREDIENTES,
+        stock_inicial=database.STOCK_INICIAL,
     )
 
 
@@ -608,6 +728,11 @@ def index():
         conn = database.get_local_conn()
         productos = _cargar_productos(conn)
         conn.close()
+        for producto in productos:
+            texto = [producto["nombre"], producto["ingredientes"]]
+            for componente in producto.get("componentes", []):
+                texto.extend((componente["nombre"], componente["ingredientes"]))
+            producto["texto_busqueda"] = " ".join(texto).casefold()
     except sqlite3.Error as e:
         flash(f"Error al cargar el menú: {e}", "danger")
         productos = []
@@ -616,6 +741,8 @@ def index():
         combos=[p for p in productos if p["tipo"] == "COMBO"],
         duos=[p for p in productos if p["tipo"] == "DUO"],
         individuales=[p for p in productos if p["tipo"] == "PIZZA"],
+        productos=productos,
+        umbral_stock_bajo=UMBRAL_STOCK_BAJO,
         entregas_pizza=ENTREGAS_PIZZA,
     )
 
@@ -637,6 +764,7 @@ def fabrica():
         "fabrica.html", pizzas=pizzas, entregas_pizza=ENTREGAS_PIZZA,
         tipos_producto=TIPOS_PRODUCTO, replicas_remotas=database.replicas_remotas(),
         total_combos=sum(1 for p in pizzas if p["tipo"] in TIPOS_COMBO), min_combos=MIN_COMBOS,
+        umbral_stock_bajo=UMBRAL_STOCK_BAJO,
     )
 
 
@@ -654,17 +782,22 @@ def fabrica_sincronizar_replica():
 @requiere_admin
 def fabrica_nueva():
     if request.method == "POST":
+        imagen_nueva = imagen_nueva_path = None
         try:
             datos = _pizza_fields_from_form()
+            datos["imagen"], imagen_nueva_path = _guardar_imagen_producto()
+            imagen_nueva = datos["imagen"]
 
             ok, last_id, error = database.replicate_write(
                 "INSERT INTO pizzas (nombre, ingredientes, refresco, precio, entrega, tipo, "
-                "pizza1_id, pizza2_id) VALUES (?,?,?,?,?,?,?,?)",
+                "pizza1_id, pizza2_id, stock, imagen) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (datos["nombre"], datos["ingredientes"], datos["refresco"], datos["precio"],
-                 datos["entrega"], datos["tipo"], datos["pizza1_id"], datos["pizza2_id"]),
+                 datos["entrega"], datos["tipo"], datos["pizza1_id"], datos["pizza2_id"],
+                 datos["stock"], datos["imagen"]),
             )
             if not ok:
                 raise RuntimeError(error)
+            imagen_nueva_path = None
             if error:
                 flash(error, "warning")
 
@@ -676,6 +809,8 @@ def fabrica_nueva():
             return redirect(url_for("fabrica"))
 
         except (ValueError, RuntimeError, sqlite3.Error) as e:
+            if imagen_nueva_path:
+                _eliminar_imagen_producto(imagen_nueva)
             flash(f"Error: {e}", "danger")
 
     tipo_actual = request.form.get("tipo") or request.args.get("tipo", "COMBO")
@@ -713,8 +848,11 @@ def fabrica_editar(pizza_id):
         return redirect(url_for("fabrica"))
 
     if request.method == "POST":
+        imagen_nueva = imagen_nueva_path = None
         try:
-            datos = _pizza_fields_from_form()
+            datos = _pizza_fields_from_form(pizza["stock"])
+            datos["imagen"], imagen_nueva_path = _guardar_imagen_producto(pizza["imagen"])
+            imagen_nueva = datos["imagen"]
             if (
                 pizza["tipo"] in TIPOS_COMBO and datos["tipo"] not in TIPOS_COMBO
                 and _contar_combos(excluir_id=pizza_id) < MIN_COMBOS
@@ -733,13 +871,16 @@ def fabrica_editar(pizza_id):
 
             ok, _, error = database.replicate_write(
                 "UPDATE pizzas SET nombre=?, ingredientes=?, refresco=?, precio=?, entrega=?, "
-                "tipo=?, pizza1_id=?, pizza2_id=? WHERE id=?",
+                "tipo=?, pizza1_id=?, pizza2_id=?, stock=?, imagen=? WHERE id=?",
                 (datos["nombre"], datos["ingredientes"], datos["refresco"], datos["precio"],
                  datos["entrega"], datos["tipo"], datos["pizza1_id"], datos["pizza2_id"],
-                 pizza_id),
+                 datos["stock"], datos["imagen"], pizza_id),
             )
             if not ok:
                 raise RuntimeError(error)
+            imagen_nueva_path = None
+            if pizza["imagen"] != datos["imagen"]:
+                _eliminar_imagen_producto(pizza["imagen"])
             if error:
                 flash(error, "warning")
 
@@ -747,6 +888,8 @@ def fabrica_editar(pizza_id):
             return redirect(url_for("fabrica"))
 
         except (ValueError, RuntimeError, sqlite3.Error) as e:
+            if imagen_nueva_path:
+                _eliminar_imagen_producto(imagen_nueva)
             flash(f"Error: {e}", "danger")
 
     ingredientes_actuales = pizza["ingredientes"].split(",") if pizza["ingredientes"] else []
@@ -761,7 +904,7 @@ def fabrica_editar(pizza_id):
 def fabrica_eliminar(pizza_id):
     try:
         conn = database.get_local_conn()
-        pizza = conn.execute("SELECT tipo FROM pizzas WHERE id=?", (pizza_id,)).fetchone()
+        pizza = conn.execute("SELECT tipo, imagen FROM pizzas WHERE id=?", (pizza_id,)).fetchone()
         conn.close()
         combos_restantes = _contar_combos(excluir_id=pizza_id)
         usados = _combos_que_usan(pizza_id)
@@ -783,6 +926,8 @@ def fabrica_eliminar(pizza_id):
     if not ok:
         flash(f"Error al eliminar: {error}", "danger")
     else:
+        if pizza is not None:
+            _eliminar_imagen_producto(pizza["imagen"])
         if error:
             flash(error, "warning")
         flash("Pizza eliminada correctamente.", "success")
@@ -879,10 +1024,18 @@ def _item_from_form(productos_por_id):
 def _resolver_carrito(carrito, productos_por_id):
     """Calcula nombre, precios y subtotal de cada línea con los precios actuales."""
     lineas = []
+    cantidades_por_producto = {}
     for item in carrito:
         producto = productos_por_id.get(item["pizza_id"])
         if producto is None:
             continue  # el producto se eliminó del menú
+        cantidad_pedida = cantidades_por_producto.get(producto["id"], 0) + item["cantidad"]
+        if cantidad_pedida > producto["stock"]:
+            raise ValueError(
+                f"Solo quedan {producto['stock']} unidades disponibles de "
+                f"'{producto['nombre']}'."
+            )
+        cantidades_por_producto[producto["id"]] = cantidad_pedida
         detalle = [tuple(par) for par in item["sodas_detalle"]]
         borde = item.get("borde", BORDE_POR_DEFECTO)
         precio_pizzas = round(producto["precio"] * item["cantidad"], 2)
@@ -1112,7 +1265,19 @@ def pedidos():
             # productos; solo se envía por correo al pagarlo.
             json_pedido = generar_json_pedido(pedido_dict)
 
-            ok, _, error = database.replicate_transaction([
+            operaciones_stock = []
+            cambios_stock_requeridos = {}
+            for linea in lineas:
+                indice = len(operaciones_stock)
+                operaciones_stock.append((
+                    "UPDATE pizzas SET stock=stock-? WHERE id=? AND stock>=?",
+                    (linea["cantidad"], linea["pizza_id"], linea["cantidad"]),
+                ))
+                cambios_stock_requeridos[indice] = (
+                    f"Stock insuficiente para '{linea['producto']['nombre']}'."
+                )
+            operaciones_pedido = [
+                *operaciones_stock,
                 *[
                     (
                         "INSERT INTO pedido_items (pedido_id, pizza_id, cantidad, precio_unitario, "
@@ -1129,7 +1294,10 @@ def pedidos():
                     "UPDATE pedidos SET json_pedido=? WHERE id=?",
                     (json_texto(json_pedido), pedido_id),
                 ),
-            ])
+            ]
+            ok, _, error = database.replicate_transaction(
+                operaciones_pedido, required_changes=cambios_stock_requeridos
+            )
             if not ok:
                 database.replicate_write("DELETE FROM pedidos WHERE id=?", (pedido_id,))
                 raise RuntimeError(error)
@@ -1151,6 +1319,10 @@ def pedidos():
                 return redirect(url_for("pedidos"))
 
         except (ValueError, RuntimeError, TypeError, sqlite3.Error) as e:
+            if str(e).startswith(("Solo quedan", "Stock insuficiente")):
+                session.pop("carrito", None)
+                flash(f"{e} El carrito se vació; vuelve a agregar los productos disponibles.", "danger")
+                return redirect(url_for("pedidos"))
             flash(f"Error al crear el pedido: {e}", "danger")
 
     # Producto preseleccionado (p. ej. desde el botón «Pedir» del menú).
@@ -1171,7 +1343,12 @@ def pedidos():
         else "COMBO"
     )
 
-    lineas = _resolver_carrito(session.get("carrito", []), productos_por_id)
+    try:
+        lineas = _resolver_carrito(session.get("carrito", []), productos_por_id)
+    except ValueError as e:
+        session.pop("carrito", None)
+        lineas = []
+        flash(f"{e} El carrito se vació; vuelve a agregar los productos disponibles.", "warning")
     borrador = session.get("pedido_borrador", {})
     return render_template(
         "pedidos.html",
@@ -1681,7 +1858,9 @@ def api_replica():
         return jsonify(error="No autorizado"), 403
     datos = request.get_json(silent=True) or {}
     try:
-        database.aplicar_operaciones_recibidas(datos.get("operaciones"))
+        database.aplicar_operaciones_recibidas(
+            datos.get("operaciones"), datos.get("required_changes")
+        )
     except (ValueError, sqlite3.Error) as e:
         return jsonify(error=str(e)), 400
     return jsonify(ok=True)

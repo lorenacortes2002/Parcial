@@ -8,7 +8,7 @@
 </div>
 
 <div class="form-card">
-<form method="POST" class="form">
+<form method="POST" class="form" enctype="multipart/form-data">
   <fieldset class="type-picker">
     <legend>¿Qué deseas crear?</legend>
     <div class="type-options">
@@ -87,6 +87,21 @@
   <label for="precio">Precio (USD)</label>
   <input id="precio" type="number" step="0.01" min="0.01" name="precio" required
          value="{{ pizza.precio if pizza and pizza.precio else request.form.get('precio', '') }}">
+
+  <label for="stock">Unidades en inventario</label>
+  <input id="stock" type="number" min="0" max="100000" name="stock" required
+    value="{{ pizza.stock if pizza and pizza.stock is not none else request.form.get('stock', stock_inicial) }}">
+  <small>El stock baja al confirmar un pedido. Los pedidos no pagados también reservan unidades; puedes corregirlo aquí si hace falta.</small>
+
+  <label for="imagen">Foto del producto (opcional)</label>
+  <input id="imagen" type="file" name="imagen" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
+  <small>JPG, PNG o WebP; máximo 5 MB. Si no subes una foto, se muestra la ilustración del menú.</small>
+  {% if pizza and pizza.imagen %}
+    <img class="product-photo-preview" src="{{ url_for('static', filename=pizza.imagen) }}" alt="Foto actual de {{ pizza.nombre }}">
+    <label class="inline-check">
+      <input type="checkbox" name="quitar_imagen" value="1"> Quitar la foto actual
+    </label>
+  {% endif %}
 
   <div class="form-actions">
     <button type="submit" class="btn">Guardar</button>

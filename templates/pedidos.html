@@ -43,9 +43,10 @@
               {% if grupo %}
               <optgroup label="{{ etiqueta }}">
                 {% for p in grupo %}
-                  <option value="{{ p.id }}" data-price="{{ p.precio }}" data-entrega="{{ p.entrega }}" data-tipo="{{ p.tipo }}" data-refresco="{{ p.refresco or '' }}"
+                  <option value="{{ p.id }}" data-price="{{ p.precio }}" data-entrega="{{ p.entrega }}" data-tipo="{{ p.tipo }}" data-refresco="{{ p.refresco or '' }}" data-stock="{{ p.stock }}"
+                    {% if p.stock == 0 %}disabled{% endif %}
                     {% if p.id == selected_pizza_id %}selected{% endif %}>
-                    {{ p.nombre }} — ${{ "%.2f"|format(p.precio) }}
+                    {{ p.nombre }} — ${{ "%.2f"|format(p.precio) }} · {{ p.stock }} disponibles
                   </option>
                 {% endfor %}
               </optgroup>
@@ -57,9 +58,10 @@
           <label for="pizza-individual-id">Pizza individual</label>
           <select id="pizza-individual-id" name="pizza_id" class="product-select" {% if categoria != 'PIZZA' %}disabled{% endif %}>
             {% for p in individuales %}
-              <option value="{{ p.id }}" data-price="{{ p.precio }}" data-entrega="{{ p.entrega }}" data-tipo="{{ p.tipo }}" data-refresco=""
+              <option value="{{ p.id }}" data-price="{{ p.precio }}" data-entrega="{{ p.entrega }}" data-tipo="{{ p.tipo }}" data-refresco="" data-stock="{{ p.stock }}"
+                {% if p.stock == 0 %}disabled{% endif %}
                 {% if p.id == selected_pizza_id %}selected{% endif %}>
-                {{ p.nombre }} — ${{ "%.2f"|format(p.precio) }}
+                {{ p.nombre }} — ${{ "%.2f"|format(p.precio) }} · {{ p.stock }} disponibles
               </option>
             {% endfor %}
           </select>
@@ -67,7 +69,9 @@
         <div class="form-field">
           <label for="cantidad">Cantidad</label>
           <input id="cantidad" type="number" name="cantidad" min="1" max="{{ max_cantidad }}"
+            data-max="{{ max_cantidad }}"
             value="{{ form.get('cantidad', 1) }}" required>
+          <small id="stock-availability" class="stock-availability" aria-live="polite"></small>
         </div>
       </div>
 
