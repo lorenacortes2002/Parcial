@@ -46,6 +46,7 @@
         <a href="{{ url_for('fabrica_editar', pizza_id=p.id) }}">Actualizar</a></li>
     {% endfor %}
   </ul>
+  <a class="btn" href="{{ url_for('fabrica_stock') }}">Ir al inventario / reponer stock</a>
 </section>
 {% endif %}
 {% endblock %}

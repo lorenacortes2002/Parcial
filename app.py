@@ -439,6 +439,23 @@ PRECIOS_SODA = {
     "2 LITROS": 3.00,
 }
 TAMANO_SODA_INCLUIDA = "LATA 12 OZ"
+TIPOS_BEBIDA = ("SODA", "AGUA", "OTRA")
+
+
+def _bebidas_activas():
+    """Bebidas activas desde la BD (rows: id, nombre, tipo, stock)."""
+    conn = database.get_local_conn()
+    try:
+        return conn.execute(
+            "SELECT id, nombre, tipo, stock FROM bebidas WHERE activo=1 ORDER BY tipo, nombre"
+        ).fetchall()
+    finally:
+        conn.close()
+
+
+def _nombres_bebidas(solo_con_stock=False):
+    """Nombres de bebidas activas; con solo_con_stock, solo las que tienen stock."""
+    return [b["nombre"] for b in _bebidas_activas() if not solo_con_stock or b["stock"] > 0]
 
 
 def _sodas_from_form():
@@ -462,7 +479,7 @@ def _sodas_from_form():
     sabores = request.form.getlist("refrescos")
     if not sabores:
         raise ValueError("Seleccione al menos un sabor de soda.")
-    if len(set(sabores)) != len(sabores) or not set(sabores).issubset(SABORES_SODA):
+    if len(set(sabores)) != len(sabores) or not set(sabores).issubset(set(_nombres_bebidas())):
         raise ValueError("Seleccione sabores de soda válidos y sin duplicados.")
     if len(sabores) > cantidad:
         raise ValueError("No puede elegir más sabores que sodas.")
@@ -582,7 +599,7 @@ def _pizza_fields_from_form(stock_default=database.STOCK_INICIAL):
             raise ValueError("Seleccione ingredientes válidos y sin duplicados.")
 
     if tipo in TIPOS_COMBO:
-        if refresco not in SABORES_SODA:
+        if refresco not in _nombres_bebidas():
             raise ValueError("Seleccione la soda que incluye el combo.")
     else:
         refresco = None  # las pizzas individuales no incluyen soda
@@ -686,7 +703,7 @@ def _fabrica_form_context(pizza, tipo_actual, entrega_actual, ingredientes_actua
     return dict(
         pizza=pizza,
         ingredientes_disponibles=INGREDIENTES_DISPONIBLES,
-        sabores_soda=SABORES_SODA,
+        sabores_soda=_nombres_bebidas(),
         tipos_producto=TIPOS_PRODUCTO, tipo_actual=tipo_actual,
         entregas_pizza=ENTREGAS_PIZZA, entrega_actual=entrega_actual,
         ingredientes_actuales=ingredientes_actuales,
@@ -766,6 +783,104 @@ def fabrica():
         total_combos=sum(1 for p in pizzas if p["tipo"] in TIPOS_COMBO), min_combos=MIN_COMBOS,
         umbral_stock_bajo=UMBRAL_STOCK_BAJO,
     )
+
+
+@app.route("/fabrica/stock")
+@requiere_admin
+def fabrica_stock():
+    """Apartado de inventario: ver y reponer stock de pizzas y bebidas."""
+    try:
+        conn = database.get_local_conn()
+        pizzas = conn.execute(
+            "SELECT id, nombre, tipo, stock FROM pizzas ORDER BY tipo, nombre"
+        ).fetchall()
+        bebidas = conn.execute(
+            "SELECT id, nombre, tipo, stock, activo FROM bebidas ORDER BY activo DESC, tipo, nombre"
+        ).fetchall()
+        conn.close()
+    except sqlite3.Error as e:
+        flash(f"Error al cargar el inventario: {e}", "danger")
+        pizzas, bebidas = [], []
+    return render_template(
+        "stock.html", pizzas=pizzas, bebidas=bebidas,
+        tipos_producto=TIPOS_PRODUCTO, tipos_bebida=TIPOS_BEBIDA,
+        umbral_stock_bajo=UMBRAL_STOCK_BAJO, max_stock=MAX_STOCK_ITEM,
+    )
+
+
+@app.route("/fabrica/stock/reponer", methods=["POST"])
+@requiere_admin
+def fabrica_stock_reponer():
+    """Agrega unidades al stock de una pizza o una bebida."""
+    try:
+        tabla = request.form.get("tabla", "")
+        if tabla not in ("pizzas", "bebidas"):
+            raise ValueError("Producto no válido.")
+        item_id = int(request.form.get("id", ""))
+        cantidad = int(request.form.get("cantidad", ""))
+        if cantidad < 1 or cantidad > MAX_STOCK_ITEM:
+            raise ValueError(f"Las unidades a agregar deben estar entre 1 y {MAX_STOCK_ITEM}.")
+        conn = database.get_local_conn()
+        try:
+            actual = conn.execute(
+                f"SELECT stock, nombre FROM {tabla} WHERE id=?", (item_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+        if actual is None:
+            raise ValueError("El producto no existe.")
+        if actual["stock"] + cantidad > MAX_STOCK_ITEM:
+            raise ValueError(f"El stock no puede superar {MAX_STOCK_ITEM} unidades.")
+        ok, _, error = database.replicate_write(
+            f"UPDATE {tabla} SET stock=stock+? WHERE id=?", (cantidad, item_id)
+        )
+        if not ok:
+            raise RuntimeError(error)
+        if error:
+            flash(error, "warning")
+        flash(f"Se agregaron {cantidad} unidades a «{actual['nombre']}».", "success")
+    except (ValueError, RuntimeError, sqlite3.Error) as e:
+        flash(f"No se pudo reponer: {e}", "danger")
+    return redirect(url_for("fabrica_stock"))
+
+
+@app.route("/fabrica/bebida/nueva", methods=["POST"])
+@requiere_admin
+def fabrica_bebida_nueva():
+    """Agrega una bebida o un sabor nuevo de refresco al inventario."""
+    try:
+        nombre = " ".join(request.form.get("nombre", "").split())
+        tipo = request.form.get("tipo", "SODA")
+        stock = int(request.form.get("stock", "0") or 0)
+        if not nombre:
+            raise ValueError("Escribe el nombre de la bebida.")
+        if len(nombre) > 60:
+            raise ValueError("El nombre de la bebida es demasiado largo.")
+        if tipo not in TIPOS_BEBIDA:
+            raise ValueError("Tipo de bebida no válido.")
+        if stock < 0 or stock > MAX_STOCK_ITEM:
+            raise ValueError(f"El stock inicial debe estar entre 0 y {MAX_STOCK_ITEM}.")
+        conn = database.get_local_conn()
+        try:
+            existe = conn.execute(
+                "SELECT 1 FROM bebidas WHERE nombre=? COLLATE NOCASE", (nombre,)
+            ).fetchone()
+        finally:
+            conn.close()
+        if existe:
+            raise ValueError("Ya existe una bebida con ese nombre.")
+        ok, _, error = database.replicate_write(
+            "INSERT INTO bebidas (nombre, tipo, stock, activo) VALUES (?,?,?,1)",
+            (nombre, tipo, stock),
+        )
+        if not ok:
+            raise RuntimeError(error)
+        if error:
+            flash(error, "warning")
+        flash(f"Bebida «{nombre}» agregada con {stock} unidades.", "success")
+    except (ValueError, RuntimeError, sqlite3.Error) as e:
+        flash(f"No se pudo agregar la bebida: {e}", "danger")
+    return redirect(url_for("fabrica_stock"))
 
 
 @app.route("/fabrica/sincronizar-replica", methods=["POST"])
@@ -1276,6 +1391,20 @@ def pedidos():
                 cambios_stock_requeridos[indice] = (
                     f"Stock insuficiente para '{linea['producto']['nombre']}'."
                 )
+            # Descontar también el stock de las bebidas (sodas/agua) pedidas.
+            bebidas_pedidas = {}
+            for linea in lineas:
+                for sabor, n in linea["sodas_detalle"]:
+                    bebidas_pedidas[sabor] = bebidas_pedidas.get(sabor, 0) + n
+            for sabor, n in bebidas_pedidas.items():
+                indice = len(operaciones_stock)
+                operaciones_stock.append((
+                    "UPDATE bebidas SET stock=stock-? WHERE nombre=? AND stock>=?",
+                    (n, sabor, n),
+                ))
+                cambios_stock_requeridos[indice] = (
+                    f"Stock insuficiente de la bebida '{sabor}'."
+                )
             operaciones_pedido = [
                 *operaciones_stock,
                 *[
@@ -1360,7 +1489,7 @@ def pedidos():
         bordes=BORDES, borde_por_defecto=BORDE_POR_DEFECTO,
         porcentaje_flete=PORCENTAJE_FLETE,
         entrega_carrito=_entrega_permitida(lineas) if lineas else "",
-        sabores_soda=SABORES_SODA, tamanos_soda=TAMANOS_SODA, precios_soda=PRECIOS_SODA,
+        sabores_soda=_nombres_bebidas(solo_con_stock=True), tamanos_soda=TAMANOS_SODA, precios_soda=PRECIOS_SODA,
         tamano_incluido=TAMANO_SODA_INCLUIDA, max_sodas=MAX_SODAS,
         max_cantidad=MAX_CANTIDAD_ITEM,
         sabores_elegidos=request.form.getlist("refrescos") if request.method == "POST" else [],

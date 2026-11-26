@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Inventario / Stock · CHINOS CAFÉ{% endblock %}
+{% block content %}
+<h1 class="section-title">Inventario y stock</h1>
+<p class="muted">Repón unidades cuando un producto se esté agotando ({{ umbral_stock_bajo }} o menos se marca en rojo). Solo el administrador puede hacerlo.</p>
+
+<div class="pedidos-barra">
+  <div class="filtros" id="filtros-stock" role="group" aria-label="Filtrar por tipo">
+    <button type="button" class="btn-filtro is-active" data-filtro="todos">Todos</button>
+    <button type="button" class="btn-filtro" data-filtro="PIZZA">Pizza</button>
+    <button type="button" class="btn-filtro" data-filtro="COMBO">Combo</button>
+    <button type="button" class="btn-filtro" data-filtro="DUO">Combo de 2 pizzas</button>
+    <button type="button" class="btn-filtro" data-filtro="BEBIDA">Bebidas</button>
+  </div>
+</div>
+
+<div class="table-wrap">
+<table class="tabla">
+  <thead>
+    <tr><th>Producto</th><th>Tipo</th><th>Stock</th><th>Reponer stock</th></tr>
+  </thead>
+  <tbody>
+    {% for p in pizzas %}
+    <tr data-tipo="{{ p.tipo }}">
+      <td>{{ p.nombre }}</td>
+      <td>{{ tipos_producto[p.tipo][0] if p.tipo in tipos_producto else p.tipo }}</td>
+      <td><span class="estado {{ 'is-low' if p.stock <= umbral_stock_bajo else '' }}">{{ p.stock }}</span></td>
+      <td>
+        <form method="post" action="{{ url_for('fabrica_stock_reponer') }}" class="reponer-form">
+          <input type="hidden" name="tabla" value="pizzas">
+          <input type="hidden" name="id" value="{{ p.id }}">
+          <input type="number" name="cantidad" min="1" max="{{ max_stock }}" value="10" class="reponer-input" aria-label="Unidades a agregar">
+          <button type="submit" class="btn">+ Reponer</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    {% for b in bebidas %}
+    <tr data-tipo="BEBIDA">
+      <td>{{ b.nombre }}{% if not b.activo %} <small class="muted">(inactiva)</small>{% endif %}</td>
+      <td>Bebida · {{ b.tipo|capitalize }}</td>
+      <td><span class="estado {{ 'is-low' if b.stock <= umbral_stock_bajo else '' }}">{{ b.stock }}</span></td>
+      <td>
+        <form method="post" action="{{ url_for('fabrica_stock_reponer') }}" class="reponer-form">
+          <input type="hidden" name="tabla" value="bebidas">
+          <input type="hidden" name="id" value="{{ b.id }}">
+          <input type="number" name="cantidad" min="1" max="{{ max_stock }}" value="10" class="reponer-input" aria-label="Unidades a agregar">
+          <button type="submit" class="btn">+ Reponer</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<section class="nueva-bebida">
+  <h2 class="section-title">Agregar bebida o sabor nuevo</h2>
+  <form method="post" action="{{ url_for('fabrica_bebida_nueva') }}" class="nueva-bebida__form">
+    <label>Nombre
+      <input name="nombre" type="text" maxlength="60" placeholder="Ej. Pepsi, Té frío, Jugo de naranja" required>
+    </label>
+    <label>Tipo
+      <select name="tipo">
+        {% for t in tipos_bebida %}<option value="{{ t }}">{{ t|capitalize }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Stock inicial
+      <input name="stock" type="number" min="0" max="{{ max_stock }}" value="100">
+    </label>
+    <button type="submit" class="btn">Agregar bebida</button>
+  </form>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='stock-filter.js') }}" defer></script>
+{% endblock %}

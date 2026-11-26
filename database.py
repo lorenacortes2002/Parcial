@@ -30,7 +30,7 @@ DB_LOCAL_PATH = os.path.join(BASE_DIR, "db_local.sqlite3")
 DB_REPLICA_PATH = os.path.join(BASE_DIR, "db_replica.sqlite3")
 
 # Tablas que se replican, en orden de dependencias (las referenciadas primero).
-TABLAS_REPLICADAS = ("pizzas", "pedidos", "pedido_items", "pagos", "cobros_yappy")
+TABLAS_REPLICADAS = ("pizzas", "bebidas", "pedidos", "pedido_items", "pagos", "cobros_yappy")
 STOCK_INICIAL = 100
 TIMEOUT_REPLICA = 5  # segundos de espera máxima a la máquina virtual
 
@@ -82,6 +82,15 @@ CREATE TABLE IF NOT EXISTS pizzas (
     pizza2_id INTEGER REFERENCES pizzas(id),
     stock INTEGER NOT NULL DEFAULT 100 CHECK (stock >= 0),
     imagen TEXT
+);
+
+-- Bebidas (sodas/agua) con inventario propio; se pueden agregar sabores nuevos.
+CREATE TABLE IF NOT EXISTS bebidas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT NOT NULL UNIQUE,
+    tipo TEXT NOT NULL DEFAULT 'SODA',     -- SODA / AGUA / OTRA
+    stock INTEGER NOT NULL DEFAULT 100 CHECK (stock >= 0),
+    activo INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS intentos_login (
@@ -208,6 +217,24 @@ def _migrate(conn):
         print(f"[AVISO DB] Hay pagos duplicados; no se creó el índice único: {e}")
 
 
+BEBIDAS_INICIALES = (
+    ("Coca-Cola", "SODA"),
+    ("Coca-Cola Zero", "SODA"),
+    ("Sprite", "SODA"),
+    ("Fanta", "SODA"),
+    ("Agua", "AGUA"),
+)
+
+
+def _seed_bebidas(conn):
+    """Inserta las bebidas por defecto si no existen (idempotente)."""
+    for nombre, tipo in BEBIDAS_INICIALES:
+        conn.execute(
+            "INSERT OR IGNORE INTO bebidas (nombre, tipo, stock, activo) VALUES (?,?,?,1)",
+            (nombre, tipo, STOCK_INICIAL),
+        )
+
+
 def _connect(path):
     """Abre una conexión segura con manejo de errores."""
     try:
@@ -237,6 +264,7 @@ def init_db():
             conn = _connect(path)
             conn.executescript(SCHEMA)
             _migrate(conn)
+            _seed_bebidas(conn)
             conn.commit()
         except sqlite3.Error as e:
             print(f"[ERROR DB] No se pudo inicializar {path}: {e}")

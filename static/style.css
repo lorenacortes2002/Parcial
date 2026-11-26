@@ -913,3 +913,12 @@ footer {
 .acciones-pago { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1rem; }
 .btn-danger { background: #c95538; border-color: #c95538; color: #fff; }
 .btn-danger:hover { filter: brightness(.95); }
+
+/* --- Inventario / stock --- */
+.estado.is-low { color: #c95538; font-weight: 700; }
+.reponer-form { display: inline-flex; gap: .4rem; align-items: center; }
+.reponer-input { width: 5rem; }
+.nueva-bebida { margin-top: 1.75rem; }
+.nueva-bebida__form { display: flex; flex-wrap: wrap; gap: .8rem; align-items: flex-end; }
+.nueva-bebida__form label { display: flex; flex-direction: column; gap: .25rem; font-size: .9rem; }
+.nueva-bebida__form input, .nueva-bebida__form select { padding: .4rem .6rem; }
