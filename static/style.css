@@ -747,6 +747,7 @@ code { padding: 2px 7px; border-radius: 6px; background: #f1ede3; font-family: u
   box-shadow: var(--shadow);
 }
 .payment-card h2 { margin: 0 0 18px; font-size: 1.45rem; }
+.card-actions { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
 .qr-box { display: grid; place-items: center; margin: 0 auto 16px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: #fff; width: fit-content; }
 .qr-box svg { display: block; width: min(240px, 60vw); height: auto; }
 .small-link { color: var(--green); font-size: .86rem; font-weight: 700; }
